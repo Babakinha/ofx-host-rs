@@ -139,7 +139,6 @@ fn main() {
 
                 if let instance::OfxHandleTarget::BabaFx(babafx) = &mut instance.target {
                     babafx.get_properties_mut().strings.insert(String::from("OfxImageEffectPropContext"), vec![String::from("OfxImageEffectContextFilter")]);
-
                 }
 
                 let instance_handle = Box::into_raw(instance) as *const c_void;
@@ -168,9 +167,12 @@ fn main() {
                 dbg!(status);
 
                 // Trigger Image Effect Action Describe
-                let properties = Box::new(instance::OfxHandle {
+                let mut properties = Box::new(instance::OfxHandle {
                     target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
                 });
+                if let instance::OfxHandleTarget::StandalonePropertySet(prop) = &mut properties.target {
+                    prop.get_properties_mut().strings.insert(String::from("OfxImageEffectPropContext"), vec![String::from("OfxImageEffectContextFilter")]);
+                }
                 let properties_handle = Box::into_raw(properties) as *mut OfxPropertySetStruct;
 
                 dbg!("Image Effect Action Describe In Context");
@@ -196,40 +198,75 @@ fn main() {
 
 
                 dbg!("Image Effect Action Get Clip Preferences");
+                let mut output = Box::new(instance::OfxHandle {
+                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                });
+                let output_handle = Box::into_raw(output) as *mut OfxPropertySetStruct;
                 let status = main_entry(
                     bindings::root::kOfxImageEffectActionGetClipPreferences.as_ptr() as *const i8,
                     instance_handle,
                     std::ptr::null_mut(), // TODO: point to real data
-                    std::ptr::null_mut(), // TODO: point to real data
+                    output_handle,
+                    // std::ptr::null_mut(), // TODO: point to real data
                 );
-                dbg!(status);
+                dbg!(status, Box::from_raw(output_handle as *mut OfxHandle));
 
                 dbg!("Image Effect Action Get Region Of Definition");
+                let mut input = Box::new(instance::OfxHandle {
+                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                });
+                if let instance::OfxHandleTarget::StandalonePropertySet(inp) = &mut input.target {
+                    inp.get_properties_mut().doubles.insert(String::from("OfxPropTime"), vec![1.0]);
+                }
+                let input_handle = Box::into_raw(input) as *mut OfxPropertySetStruct;
+                let mut output = Box::new(instance::OfxHandle {
+                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                });
+                let output_handle = Box::into_raw(output) as *mut OfxPropertySetStruct;
                 let status = main_entry(
                     bindings::root::kOfxImageEffectActionGetRegionOfDefinition.as_ptr() as *const i8,
                     instance_handle,
-                    std::ptr::null_mut(), // TODO: point to real data
-                    std::ptr::null_mut(), // TODO: point to real data
+                    input_handle,
+                    output_handle,
                 );
-                dbg!(status);
+                dbg!(status, Box::from_raw(output_handle as *mut OfxHandle));
 
                 dbg!("Image Effect Action Get Region Of Interest");
+                let mut input = Box::new(instance::OfxHandle {
+                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                });
+                let input_handle = Box::into_raw(input) as *mut OfxPropertySetStruct;
+                let mut output = Box::new(instance::OfxHandle {
+                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                });
+                let output_handle = Box::into_raw(output) as *mut OfxPropertySetStruct;
                 let status = main_entry(
                     bindings::root::kOfxImageEffectActionGetRegionsOfInterest.as_ptr() as *const i8,
                     instance_handle,
-                    std::ptr::null_mut(), // TODO: point to real data
-                    std::ptr::null_mut(), // TODO: point to real data
+                    input_handle,
+                    output_handle,
                 );
-                dbg!(status);
+                dbg!(status, Box::from_raw(output_handle as *mut OfxHandle));
 
                 dbg!("Image Effect Action Render");
+                let mut input = Box::new(instance::OfxHandle {
+                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                });
+                if let instance::OfxHandleTarget::StandalonePropertySet(inp) = &mut input.target {
+                    inp.get_properties_mut().doubles.insert(String::from("OfxPropTime"), vec![1.0]);
+                }
+                let input_handle = Box::into_raw(input) as *mut OfxPropertySetStruct;
+                let mut output = Box::new(instance::OfxHandle {
+                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                });
+                let output_handle = Box::into_raw(output) as *mut OfxPropertySetStruct;
                 let status = main_entry(
                     bindings::root::kOfxImageEffectActionRender.as_ptr() as *const i8,
                     instance_handle,
-                    std::ptr::null_mut(), // TODO: point to real data
-                    std::ptr::null_mut(), // TODO: point to real data
+                    input_handle,
+                    output_handle
                 );
-                dbg!(status);
+                dbg!(status, Box::from_raw(output_handle as *mut OfxHandle));
 
                 dbg!("Action Destroy Instance");
                 let status = main_entry(

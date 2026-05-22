@@ -3,7 +3,7 @@ use crate::bindings::root::{
     OfxParamHandle, OfxParamSetHandle, OfxPropertySetHandle, OfxRangeD, OfxStatus, OfxTime,
 };
 use crate::instance::{self, OfxHandle, PropertySet};
-use std::ffi::CStr;
+use std::ffi::{CStr, c_void};
 use std::os::raw::{c_char, c_int, c_uint};
 
 // ==========================================
@@ -49,7 +49,11 @@ unsafe extern "C" fn param_define(
 
             if !property_set.is_null() {
                 unsafe {
-                    *property_set = babafx_instance.parameters.get_mut(&name_str).unwrap().as_mut() as *mut _
+                    *property_set = babafx_instance
+                        .parameters
+                        .get_mut(&name_str)
+                        .unwrap()
+                        .as_mut() as *mut _
                         as *mut OfxPropertySetStruct;
                 }
             }
@@ -91,9 +95,11 @@ unsafe extern "C" fn param_get_handle(
                 }
             }
         } else {
+            dbg!("Error");
             return 1;
         }
     } else {
+        dbg!("Error");
         return 1; // Error
     }
 
@@ -129,13 +135,105 @@ unsafe extern "C" fn param_get_value(_param_handle: OfxParamHandle, _: ...) -> O
 }
 
 unsafe extern "C" fn param_get_value_at_time(
-    _param_handle: OfxParamHandle,
+    param_handle: OfxParamHandle,
     _time: OfxTime,
-    _: ...
+    mut args: ...
 ) -> OfxStatus {
     dbg!("param_get_value_at_time");
-    eprintln!("paramGetValueAtTime not implemented");
-    2
+    eprintln!("param_get_value_at_time half implemented");
+
+    let instance_ptr = param_handle as *mut OfxHandle;
+    let instance = unsafe { &mut *instance_ptr };
+
+    if let instance::OfxHandleTarget::ParameterThing(param) = &mut instance.target {
+        dbg!(&param);
+        match param.param_type.as_str() {
+            "OfxParamTypeDouble2D" => {
+                // Get values from your property map (index 0 and 1)
+                if let Some(vals) = param.properties.doubles.get("OfxParamPropDefault") {
+                    unsafe {
+                        *args.next_arg::<*mut f64>() = vals[0];
+                        *args.next_arg::<*mut f64>() = vals[1];
+                    }
+                    return 0; // kOfxStatOK
+                } else {
+                    dbg!("Error");
+                    return 1;
+                }
+            }
+            "OfxParamTypeRGBA" => {
+                dbg!(&param);
+                if let Some(vals) = param.properties.doubles.get("OfxParamPropDefault") {
+                    unsafe {
+                        // Grab the first variadic argument token
+                        let first_arg = args.next_arg::<*mut c_void>();
+
+                        // Test Hypothesis A: It's a single pointer to an array of 4 doubles (f64)
+                        let array_ptr = first_arg as *mut f64;
+                        if !array_ptr.is_null() {
+                            *array_ptr.offset(0) = 1.0; // R
+                            *array_ptr.offset(1) = 0.7; // G
+                            *array_ptr.offset(2) = 0.7; // B
+                            *array_ptr.offset(3) = 1.0; // A
+                        }
+
+                        // Test Hypothesis B: It's 4 distinct arguments passed on the stack.
+                        // We safely advance to extract the remaining 3 just in case.
+                        let _g_ptr = args.next_arg::<*mut f64>();
+                        let _b_ptr = args.next_arg::<*mut f64>();
+                        let _a_ptr = args.next_arg::<*mut f64>();
+
+                        // If they were distinct pointers, we assign them here:
+                        if !first_arg.is_null() && !_g_ptr.is_null() {
+                            *(first_arg as *mut f64) = 1.0;
+                            *_g_ptr = 0.7;
+                            *_b_ptr = 0.7;
+                            *_a_ptr = 1.0;
+                        }
+                    }
+                    return 0;
+                } else {
+                    dbg!("Imagining Defaults For RGBA Parameters");
+                    unsafe {
+                        // Grab the first variadic argument token
+                        let first_arg = args.next_arg::<*mut c_void>();
+
+                        // Test Hypothesis A: It's a single pointer to an array of 4 doubles (f64)
+                        let array_ptr = first_arg as *mut f64;
+                        if !array_ptr.is_null() {
+                            *array_ptr.offset(0) = 1.0; // R
+                            *array_ptr.offset(1) = 0.7; // G
+                            *array_ptr.offset(2) = 0.7; // B
+                            *array_ptr.offset(3) = 1.0; // A
+                        }
+
+                        // Test Hypothesis B: It's 4 distinct arguments passed on the stack.
+                        // We safely advance to extract the remaining 3 just in case.
+                        let _g_ptr = args.next_arg::<*mut f64>();
+                        let _b_ptr = args.next_arg::<*mut f64>();
+                        let _a_ptr = args.next_arg::<*mut f64>();
+
+                        // If they were distinct pointers, we assign them here:
+                        if !first_arg.is_null() && !_g_ptr.is_null() {
+                            *(first_arg as *mut f64) = 1.0;
+                            *_g_ptr = 0.7;
+                            *_b_ptr = 0.7;
+                            *_a_ptr = 1.0;
+                        }
+                    }
+                    return 0;
+                }
+            }
+            param_type => {
+                eprintln!("Param type: {param_type} not supported");
+            } // Unsupported for now
+        }
+    } else {
+        dbg!("Error");
+        return 1; // Error
+    }
+
+    0
 }
 
 unsafe extern "C" fn param_get_derivative(

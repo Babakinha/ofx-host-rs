@@ -12,6 +12,7 @@ unsafe extern "C" fn prop_set_pointer(
 ) -> OfxStatus {
     dbg!("prop_set_pointer");
     if properties.is_null() || property.is_null() || index < 0 {
+            dbg!("Error", property, properties, index);
         return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
     }
 
@@ -21,10 +22,14 @@ unsafe extern "C" fn prop_set_pointer(
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
-        Err(_) => return 1, // kOfxStatFailed
+        Err(_) => {
+            dbg!("Error");
+            return 1;
+        } // kOfxStatFailed
     };
 
     let idx = index as usize;
+    dbg!(&instance, &idx, &prop_key, value);
     let entry = instance
         .get_propeties_mut()
         .pointers
@@ -48,6 +53,7 @@ unsafe extern "C" fn prop_set_string(
 ) -> OfxStatus {
     dbg!("prop_set_string");
     if properties.is_null() || property.is_null() || index < 0 {
+            dbg!("Error", property, properties, index);
         return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
     }
 
@@ -57,15 +63,22 @@ unsafe extern "C" fn prop_set_string(
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
-        Err(_) => return 1, // kOfxStatFailed
+        Err(_) => {
+            dbg!("Error");
+            return 1;
+        }
     };
 
     let c_str = unsafe { CStr::from_ptr(value) };
     let prop_value = match c_str.to_str() {
         Ok(s) => s.to_string(),
-        Err(_) => return 1, // kOfxStatFailed
+        Err(_) => {
+            dbg!("Error");
+            return 1;
+        }
     };
 
+    dbg!(&prop_key, &index);
     let idx = index as usize;
     let entry = instance
         .get_propeties_mut()
@@ -90,6 +103,7 @@ unsafe extern "C" fn prop_set_double(
 ) -> OfxStatus {
     dbg!("prop_set_double");
     if properties.is_null() || property.is_null() || index < 0 {
+            dbg!("Error", property, properties, index);
         return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
     }
 
@@ -99,9 +113,13 @@ unsafe extern "C" fn prop_set_double(
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
-        Err(_) => return 1, // kOfxStatFailed
+        Err(_) => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
     };
 
+    dbg!(&prop_key, &index);
     let idx = index as usize;
     let entry = instance
         .get_propeties_mut()
@@ -126,6 +144,7 @@ unsafe extern "C" fn prop_set_int(
 ) -> OfxStatus {
     dbg!("prop_set_int");
     if properties.is_null() || property.is_null() || index < 0 {
+            dbg!("Error", property, properties, index);
         return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
     }
 
@@ -135,9 +154,13 @@ unsafe extern "C" fn prop_set_int(
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
-        Err(_) => return 1, // kOfxStatFailed
+        Err(_) => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
     };
 
+    dbg!(&prop_key, &index);
     let idx = index as usize;
     let entry = instance
         .get_propeties_mut()
@@ -177,14 +200,46 @@ unsafe extern "C" fn prop_set_string_n(
 }
 
 unsafe extern "C" fn prop_set_double_n(
-    _properties: OfxPropertySetHandle,
-    _property: *const c_char,
-    _count: c_int,
-    _value: *const f64,
+    properties: OfxPropertySetHandle,
+    property: *const c_char,
+    count: c_int,
+    value: *const f64,
 ) -> OfxStatus {
     dbg!("prop_set_double_n");
-    eprintln!("propSetDoubleN not implemented");
-    2
+    if properties.is_null() || property.is_null() || count < 0 {
+            dbg!("Error", property, properties, count);
+        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+    }
+
+    let instance_ptr = properties as *mut OfxHandle;
+    let instance = unsafe { &mut *instance_ptr };
+
+    let c_str = unsafe { CStr::from_ptr(property) };
+    let prop_key = match c_str.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
+    };
+
+    dbg!(&instance, &prop_key);
+    let entry = instance
+        .get_propeties_mut()
+        .doubles
+        .entry(prop_key)
+        .or_insert_with(Vec::new);
+
+    let incoming_values = unsafe { std::slice::from_raw_parts(value, count as usize) };
+
+    // Ensure the vector is large enough to accommodate the incoming index
+    if entry.len() < incoming_values.len() {
+        entry.resize(incoming_values.len(), 0_f64);
+    }
+
+    entry[..incoming_values.len()].copy_from_slice(incoming_values);
+
+    kOfxStatOK as i32
 }
 
 unsafe extern "C" fn prop_set_int_n(
@@ -206,6 +261,7 @@ unsafe extern "C" fn prop_get_pointer(
 ) -> OfxStatus {
     dbg!("prop_get_pointer");
     if properties.is_null() || property.is_null() || index < 0 {
+            dbg!("Error", property, properties, index);
         return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
     }
 
@@ -215,9 +271,13 @@ unsafe extern "C" fn prop_get_pointer(
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
-        Err(_) => return 1, // kOfxStatFailed
+        Err(_) => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
     };
 
+    dbg!(&prop_key, &index);
     let idx = index as usize;
     let entry = instance
         .get_propeties_mut()
@@ -230,7 +290,11 @@ unsafe extern "C" fn prop_get_pointer(
         Some(pointer) => unsafe {
             *value = pointer.clone();
         },
-        None => return 1, // kOfxStatFailed
+        None => {
+            dbg!(instance, index, prop_key);
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
     }
 
     kOfxStatOK as i32
@@ -244,6 +308,7 @@ unsafe extern "C" fn prop_get_string(
 ) -> OfxStatus {
     dbg!("prop_get_string");
     if properties.is_null() || property.is_null() || index < 0 {
+            dbg!("Error", property, properties, index);
         return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
     }
 
@@ -253,9 +318,14 @@ unsafe extern "C" fn prop_get_string(
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
-        Err(_) => return 1, // kOfxStatFailed
+        Err(_) => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
     };
+    dbg!(&instance, &prop_key, &index);
 
+    dbg!(&prop_key, &index);
     let idx = index as usize;
     let entry = instance
         .get_propeties_mut()
@@ -269,32 +339,105 @@ unsafe extern "C" fn prop_get_string(
             let c_string = CString::new(string.as_bytes()).unwrap().into_raw();
             *value = c_string as *mut i8;
         },
-        None => return 1, // kOfxStatFailed
+        None => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
     }
 
     kOfxStatOK as i32
 }
 
 unsafe extern "C" fn prop_get_double(
-    _properties: OfxPropertySetHandle,
-    _property: *const c_char,
-    _index: c_int,
-    _value: *mut f64,
+    properties: OfxPropertySetHandle,
+    property: *const c_char,
+    index: c_int,
+    value: *mut f64,
 ) -> OfxStatus {
     dbg!("prop_get_double");
-    eprintln!("propGetDouble not implemented");
-    2
+    if properties.is_null() || property.is_null() || index < 0 {
+            dbg!("Error", property, properties, index);
+        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+    }
+
+    let instance_ptr = properties as *mut OfxHandle;
+    let instance = unsafe { &mut *instance_ptr };
+
+    let c_str = unsafe { CStr::from_ptr(property) };
+    let prop_key = match c_str.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
+    };
+
+    dbg!(&instance, index, &prop_key);
+    let idx = index as usize;
+    let entry = instance
+        .get_propeties_mut()
+        .doubles
+        .entry(prop_key.clone())
+        .or_insert_with(Vec::new);
+
+    let entry_value = entry.get_mut(idx);
+    match entry_value {
+        Some(double) => unsafe {
+            *value = double.clone();
+        },
+        None => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
+    }
+
+    kOfxStatOK as i32
 }
 
 unsafe extern "C" fn prop_get_int(
-    _properties: OfxPropertySetHandle,
-    _property: *const c_char,
-    _index: c_int,
-    _value: *mut c_int,
+    properties: OfxPropertySetHandle,
+    property: *const c_char,
+    index: c_int,
+    value: *mut c_int,
 ) -> OfxStatus {
     dbg!("prop_get_int");
-    eprintln!("propGetInt not implemented");
-    2
+    if properties.is_null() || property.is_null() || index < 0 {
+            dbg!("Error", property, properties, index);
+        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+    }
+
+    let instance_ptr = properties as *mut OfxHandle;
+    let instance = unsafe { &mut *instance_ptr };
+
+    let c_str = unsafe { CStr::from_ptr(property) };
+    let prop_key = match c_str.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
+    };
+
+    dbg!(&instance, index, &prop_key);
+    let idx = index as usize;
+    let entry = instance
+        .get_propeties_mut()
+        .ints
+        .entry(prop_key.clone())
+        .or_insert_with(Vec::new);
+
+    let entry_value = entry.get_mut(idx);
+    match entry_value {
+        Some(int) => unsafe {
+            *value = int.clone();
+        },
+        None => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
+    }
+
+    kOfxStatOK as i32
 }
 
 unsafe extern "C" fn prop_get_pointer_n(
@@ -320,25 +463,85 @@ unsafe extern "C" fn prop_get_string_n(
 }
 
 unsafe extern "C" fn prop_get_double_n(
-    _properties: OfxPropertySetHandle,
-    _property: *const c_char,
-    _count: c_int,
-    _value: *mut f64,
+    properties: OfxPropertySetHandle,
+    property: *const c_char,
+    count: c_int,
+    value: *mut f64,
 ) -> OfxStatus {
     dbg!("prop_get_double_n");
-    eprintln!("propGetDoubleN not implemented");
-    2
+    if properties.is_null() || property.is_null() {
+            dbg!("Error", property, properties, count);
+        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+    }
+
+    let instance_ptr = properties as *mut OfxHandle;
+    let instance = unsafe { &mut *instance_ptr };
+
+    let c_str = unsafe { CStr::from_ptr(property) };
+    let prop_key = match c_str.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
+    };
+
+    dbg!(&instance, &prop_key);
+    let entry = instance
+        .get_propeties_mut()
+        .doubles
+        .entry(prop_key.clone())
+        .or_insert_with(Vec::new);
+
+    if count as usize >= entry.len() {
+        entry.resize(count as usize, 0_f64);
+    }
+
+    let outgoing_array = unsafe { std::slice::from_raw_parts_mut(value, count as usize) };
+    outgoing_array.copy_from_slice(&entry[..count as usize]);
+
+    kOfxStatOK as i32
 }
 
 unsafe extern "C" fn prop_get_int_n(
-    _properties: OfxPropertySetHandle,
-    _property: *const c_char,
-    _count: c_int,
-    _value: *mut c_int,
+    properties: OfxPropertySetHandle,
+    property: *const c_char,
+    count: c_int,
+    value: *mut c_int,
 ) -> OfxStatus {
     dbg!("prop_get_int_n");
-    eprintln!("propGetIntN not implemented");
-    2
+    if properties.is_null() || property.is_null() {
+            dbg!("Error", property, properties, count);
+        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+    }
+
+    let instance_ptr = properties as *mut OfxHandle;
+    let instance = unsafe { &mut *instance_ptr };
+
+    let c_str = unsafe { CStr::from_ptr(property) };
+    let prop_key = match c_str.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            dbg!("Error");
+            return 1; // kOfxStatFailed
+        }
+    };
+
+    dbg!(&instance, &prop_key);
+    let entry = instance
+        .get_propeties_mut()
+        .ints
+        .entry(prop_key.clone())
+        .or_insert_with(Vec::new);
+
+    if count as usize >= entry.len() {
+        entry.resize(count as usize, 0);
+    }
+
+    let outgoing_array = unsafe { std::slice::from_raw_parts_mut(value, count as usize) };
+    outgoing_array.copy_from_slice(&entry[..count as usize]);
+
+    kOfxStatOK as i32
 }
 
 unsafe extern "C" fn prop_reset(

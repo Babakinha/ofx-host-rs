@@ -1,26 +1,32 @@
-use std::os::raw::{c_int, c_uint, c_void};
 use crate::bindings::root;
 use crate::bindings::root::{OfxMutexHandle, OfxStatus, OfxThreadFunctionV1};
+use std::os::raw::{c_int, c_uint, c_void};
 
 // ==========================================
 // 1. THREAD SPAWNING & INFORMATION
 // ==========================================
 
 unsafe extern "C" fn multi_thread(
-    _func: OfxThreadFunctionV1,
-    _n_threads: c_uint,
-    _custom_arg: *mut c_void,
+    func: OfxThreadFunctionV1,
+    n_threads: c_uint,
+    custom_arg: *mut c_void,
 ) -> OfxStatus {
     dbg!("multi_thread");
-    eprintln!("multiThread not implemented");
-    2 // kOfxStatErrUnsupported
+    let func = func.unwrap();
+    dbg!(&func, &n_threads, &custom_arg);
+    unsafe {
+        func(0, 1, custom_arg);
+    }
+    0
 }
 
 unsafe extern "C" fn multi_thread_num_cpus(n_cpus: *mut c_uint) -> OfxStatus {
     dbg!("multi_thread_num_cpus");
     eprintln!("multiThreadNumCPUs called - reporting 1 CPU core");
     if !n_cpus.is_null() {
-        unsafe { *n_cpus = 1; } // Safely declare 1 core to prevent divide-by-zero crashes
+        unsafe {
+            *n_cpus = 1;
+        } // Safely declare 1 core to prevent divide-by-zero crashes
         0 // kOfxStatOK
     } else {
         1 // kOfxStatFailed
@@ -31,7 +37,9 @@ unsafe extern "C" fn multi_thread_index(thread_index: *mut c_uint) -> OfxStatus 
     dbg!("multi_thread_index");
     eprintln!("multiThreadIndex called");
     if !thread_index.is_null() {
-        unsafe { *thread_index = 0; } // Base index for single-threaded fallback
+        unsafe {
+            *thread_index = 0;
+        } // Base index for single-threaded fallback
         0
     } else {
         1
