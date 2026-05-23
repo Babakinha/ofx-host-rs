@@ -81,15 +81,18 @@ unsafe extern "C" fn clip_define(
     dbg!("clip_define");
     let instance_ptr = image_effect as *mut OfxHandle;
     let instance = unsafe { &mut *instance_ptr };
-    dbg!(&instance);
 
     match &mut instance.target {
         crate::instance::OfxHandleTarget::BabaFx(babafx_instance) => {
             let c_str = unsafe { CStr::from_ptr(name) };
             let name_str = match c_str.to_str() {
                 Ok(s) => s.to_string(),
-                Err(_) => return 1, // kOfxStatFailed
+                Err(_) => {
+                    dbg!("Error");
+                    return 1;
+                } // kOfxStatFailed
             };
+            dbg!(&instance_ptr, &name_str, &property_set);
 
             babafx_instance.clips.insert(
                 name_str.clone(),
@@ -123,8 +126,14 @@ unsafe extern "C" fn clip_define(
                                 // --- The Missing Pieces ---
 
                                 // 1. Image Data Pointer
-                                let mut pixel_buffer = vec![127u8; total_bytes].into_boxed_slice();
+                                let pixel_buffer = image::ImageReader::open("input.png")
+                                    .unwrap()
+                                    .decode()
+                                    .unwrap()
+                                    .to_rgba8()
+                                    .into_raw();
 
+                                let pixel_buffer = pixel_buffer.into_boxed_slice();
                                 set.pointers.insert(
                                     "OfxImagePropData".to_string(),
                                     vec![Box::into_raw(pixel_buffer) as *mut c_void],
@@ -175,7 +184,10 @@ unsafe extern "C" fn clip_define(
 
             return 0;
         }
-        _ => return 1, // kOfxStatFailed
+        _ => {
+            dbg!("Error");
+            return 1;
+        } // kOfxStatFailed
     }
 }
 
@@ -192,8 +204,13 @@ unsafe extern "C" fn clip_get_handle(
     let c_str = unsafe { CStr::from_ptr(name) };
     let name_str = match c_str.to_str() {
         Ok(s) => s.to_string(),
-        Err(_) => return 1, // kOfxStatFailed
+        Err(_) => {
+            dbg!("Error");
+            return 1;
+        } // kOfxStatFailed
     };
+
+    dbg!(&instance_ptr, &name_str, &clip, &property_set);
 
     if let instance::OfxHandleTarget::BabaFx(babafx) = &mut instance.target {
         if let Some(clip_instance) = babafx.clips.get_mut(&name_str) {
@@ -229,8 +246,8 @@ unsafe extern "C" fn clip_get_property_set(
 
     // TODO: uhm... idk if this is right...
     let instance_ptr = clip as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
-    dbg!(&instance);
+    // let instance = unsafe { &mut *instance_ptr };
+    dbg!(&instance_ptr, &prop_handle);
 
     // let prop_set_ptr = instance.get_propeties_mut() as *mut PropertySet;
     unsafe {
@@ -251,6 +268,8 @@ unsafe extern "C" fn clip_get_image(
     let instance_ptr = clip as *mut OfxHandle;
     let instance = unsafe { &mut *instance_ptr };
 
+    dbg!(&clip, &_time, &_region, &image_handle);
+
     if let instance::OfxHandleTarget::ClipThing(_clip) = &mut instance.target {
         unsafe {
             *image_handle = instance_ptr as *mut OfxPropertySetStruct;
@@ -268,7 +287,7 @@ unsafe extern "C" fn clip_release_image(image_handle: OfxPropertySetHandle) -> O
     eprintln!("clip_release_image half implemented");
     let instance_ptr = image_handle as *mut OfxHandle;
     let instance = unsafe { &mut *instance_ptr };
-    dbg!(&instance);
+    dbg!(&instance_ptr);
 
     // 1. Retrieve the raw pointer you stored in the Output clip's PropertySet
     let raw_ptr: *mut c_void = instance
@@ -305,19 +324,40 @@ unsafe extern "C" fn clip_get_region_of_definition(
     bounds: *mut OfxRectD,
 ) -> OfxStatus {
     dbg!("clip_get_region_of_definition");
-    eprintln!("clip_get_region_of_definition half implemented");
-    let _instance_ptr = clip as *mut OfxHandle;
-    // let instance = unsafe { &mut *instance_ptr };
 
-    let rect = OfxRectD {
-        x1: f64::MIN,
-        y1: f64::MIN,
-        x2: f64::MAX,
-        y2: f64::MAX,
-    };
+    if clip.is_null() || bounds.is_null() {
+        dbg!(clip, bounds);
+        return 1; // kOfxStatErrBadHandle / kOfxStatErrBadToctx
+    }
 
+
+    let clip_handle = clip as *mut OfxHandle;
+    let instance = unsafe { &*clip_handle };
+
+    dbg!(&clip_handle, &_time, &bounds);
+
+    if let instance::OfxHandleTarget::ClipThing(clip_thing) = &instance.target {
+        // Look up the integer bounds you stored in this clip when you created it
+        if let Some(int_bounds) = clip_thing.properties.ints.get("OfxImagePropBounds") {
+            // int_bounds is typically [x1, y1, x2, y2] -> [0, 0, 720, 480]
+            dbg!(&int_bounds);
+            unsafe {
+                (*bounds).x1 = int_bounds[0] as f64;
+                (*bounds).y1 = int_bounds[1] as f64;
+                (*bounds).x2 = int_bounds[2] as f64;
+                (*bounds).y2 = int_bounds[3] as f64;
+            }
+            return 0; // kOfxStatOK
+        }
+    }
+
+    dbg!("Fallback");
+    // Fallback if the clip doesn't have bounds populated yet
     unsafe {
-        *bounds = rect;
+        (*bounds).x1 = 0.0;
+        (*bounds).y1 = 0.0;
+        (*bounds).x2 = 720.0;
+        (*bounds).y2 = 480.0;
     }
 
     0
@@ -344,7 +384,10 @@ unsafe extern "C" fn image_memory_alloc(
 ) -> OfxStatus {
     dbg!("image_memory_alloc");
     if memory_handle.is_null() || n_bytes == 0 {
-        return 1; // kOfxStatFailed
+        {
+            dbg!("Error");
+            return 1;
+        } // kOfxStatFailed
     }
 
     let header_size = std::mem::size_of::<ImageMemoryHeader>();

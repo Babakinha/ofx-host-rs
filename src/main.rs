@@ -18,12 +18,14 @@ mod suites;
 use std::ffi::{CStr, c_char, c_void};
 
 use crate::{
-    bindings::root::OfxPropertySetStruct, instance::{AsPropertySet, BabafxInstance, OfxHandle}, suites::{
+    bindings::root::OfxPropertySetStruct,
+    instance::{AsPropertySet, BabafxInstance, OfxHandle},
+    suites::{
         image_effect_suite::image_effect_suite, interact_suite::interact_suite,
         memory_suite::memory_suite, message_suite::message_suite,
         multithread_suite::multithread_suite, parameter_suite::parameter_suite,
         property_suite::property_suite,
-    }
+    },
 };
 
 unsafe extern "C" fn host_fetch_suite(
@@ -97,7 +99,9 @@ unsafe extern "C" fn host_fetch_suite(
 fn main() {
     unsafe {
         // Load ofx file
-        let lib = libloading::Library::new("./example-Rectangle.ofx").unwrap();
+        // let lib = libloading::Library::new("/home/babakinha/Downloads/ofx/fasd/openfx_plugins-linux-ubuntu-35fcf0be/example-Invert.ofx.bundle/Contents/Linux-x86-64/example-Invert.ofx").unwrap();
+        // let lib = libloading::Library::new("/home/babakinha/Downloads/ofx/fasd/openfx_plugins-linux-ubuntu-35fcf0be/example-Rectangle.ofx.bundle/Contents/Linux-x86-64/example-Rectangle.ofx").unwrap();
+        let lib = libloading::Library::new("/home/babakinha/dev/clones/openfx/build/Examples/example-Rectangle.ofx").unwrap();
 
         // Get plugins
         let get_num_plugins: Symbol<unsafe extern "C" fn() -> i32> =
@@ -138,7 +142,10 @@ fn main() {
                 });
 
                 if let instance::OfxHandleTarget::BabaFx(babafx) = &mut instance.target {
-                    babafx.get_properties_mut().strings.insert(String::from("OfxImageEffectPropContext"), vec![String::from("OfxImageEffectContextFilter")]);
+                    babafx.get_properties_mut().strings.insert(
+                        String::from("OfxImageEffectPropContext"),
+                        vec![String::from("OfxImageEffectContextGeneral")],
+                    );
                 }
 
                 let instance_handle = Box::into_raw(instance) as *const c_void;
@@ -168,10 +175,17 @@ fn main() {
 
                 // Trigger Image Effect Action Describe
                 let mut properties = Box::new(instance::OfxHandle {
-                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                    target: instance::OfxHandleTarget::StandalonePropertySet(
+                        instance::StandalonePropertySet::new(),
+                    ),
                 });
-                if let instance::OfxHandleTarget::StandalonePropertySet(prop) = &mut properties.target {
-                    prop.get_properties_mut().strings.insert(String::from("OfxImageEffectPropContext"), vec![String::from("OfxImageEffectContextFilter")]);
+                if let instance::OfxHandleTarget::StandalonePropertySet(prop) =
+                    &mut properties.target
+                {
+                    prop.get_properties_mut().strings.insert(
+                        String::from("OfxImageEffectPropContext"),
+                        vec![String::from("OfxImageEffectContextFilter")],
+                    );
                 }
                 let properties_handle = Box::into_raw(properties) as *mut OfxPropertySetStruct;
 
@@ -196,10 +210,11 @@ fn main() {
                 );
                 dbg!(status);
 
-
                 dbg!("Image Effect Action Get Clip Preferences");
                 let mut output = Box::new(instance::OfxHandle {
-                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                    target: instance::OfxHandleTarget::StandalonePropertySet(
+                        instance::StandalonePropertySet::new(),
+                    ),
                 });
                 let output_handle = Box::into_raw(output) as *mut OfxPropertySetStruct;
                 let status = main_entry(
@@ -213,18 +228,25 @@ fn main() {
 
                 dbg!("Image Effect Action Get Region Of Definition");
                 let mut input = Box::new(instance::OfxHandle {
-                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                    target: instance::OfxHandleTarget::StandalonePropertySet(
+                        instance::StandalonePropertySet::new(),
+                    ),
                 });
                 if let instance::OfxHandleTarget::StandalonePropertySet(inp) = &mut input.target {
-                    inp.get_properties_mut().doubles.insert(String::from("OfxPropTime"), vec![1.0]);
+                    inp.get_properties_mut()
+                        .doubles
+                        .insert(String::from("OfxPropTime"), vec![1.0]);
                 }
                 let input_handle = Box::into_raw(input) as *mut OfxPropertySetStruct;
                 let mut output = Box::new(instance::OfxHandle {
-                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                    target: instance::OfxHandleTarget::StandalonePropertySet(
+                        instance::StandalonePropertySet::new(),
+                    ),
                 });
                 let output_handle = Box::into_raw(output) as *mut OfxPropertySetStruct;
                 let status = main_entry(
-                    bindings::root::kOfxImageEffectActionGetRegionOfDefinition.as_ptr() as *const i8,
+                    bindings::root::kOfxImageEffectActionGetRegionOfDefinition.as_ptr()
+                        as *const i8,
                     instance_handle,
                     input_handle,
                     output_handle,
@@ -233,11 +255,23 @@ fn main() {
 
                 dbg!("Image Effect Action Get Region Of Interest");
                 let mut input = Box::new(instance::OfxHandle {
-                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                    target: instance::OfxHandleTarget::StandalonePropertySet(
+                        instance::StandalonePropertySet::new(),
+                    ),
                 });
+                if let instance::OfxHandleTarget::StandalonePropertySet(inp) = &mut input.target {
+                    inp.get_properties_mut()
+                        .doubles
+                        .insert(String::from("OfxImageEffectPropRegionOfInterest"), vec![0.0, 0.0, 0.8, 0.8]);
+                    inp.get_properties_mut()
+                        .doubles
+                        .insert(String::from("OfxImageClipPropRoI_Source"), vec![0.0, 0.0, 0.8, 0.8]);
+                }
                 let input_handle = Box::into_raw(input) as *mut OfxPropertySetStruct;
                 let mut output = Box::new(instance::OfxHandle {
-                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                    target: instance::OfxHandleTarget::StandalonePropertySet(
+                        instance::StandalonePropertySet::new(),
+                    ),
                 });
                 let output_handle = Box::into_raw(output) as *mut OfxPropertySetStruct;
                 let status = main_entry(
@@ -250,23 +284,72 @@ fn main() {
 
                 dbg!("Image Effect Action Render");
                 let mut input = Box::new(instance::OfxHandle {
-                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                    target: instance::OfxHandleTarget::StandalonePropertySet(
+                        instance::StandalonePropertySet::new(),
+                    ),
                 });
                 if let instance::OfxHandleTarget::StandalonePropertySet(inp) = &mut input.target {
-                    inp.get_properties_mut().doubles.insert(String::from("OfxPropTime"), vec![1.0]);
+                    inp.get_properties_mut()
+                        .doubles
+                        .insert(String::from("OfxPropTime"), vec![1.0]);
+                    inp.get_properties_mut()
+                        .doubles
+                        .insert(String::from("OfxImageEffectPropRenderScale"), vec![720.0, 480.0]);
+                    inp.get_properties_mut()
+                        .ints
+                        .insert(String::from("OfxImageEffectPropRenderWindow"), vec![0, 0, 720, 480]);
                 }
                 let input_handle = Box::into_raw(input) as *mut OfxPropertySetStruct;
                 let mut output = Box::new(instance::OfxHandle {
-                    target: instance::OfxHandleTarget::StandalonePropertySet(instance::StandalonePropertySet::new()),
+                    target: instance::OfxHandleTarget::StandalonePropertySet(
+                        instance::StandalonePropertySet::new(),
+                    ),
                 });
                 let output_handle = Box::into_raw(output) as *mut OfxPropertySetStruct;
                 let status = main_entry(
                     bindings::root::kOfxImageEffectActionRender.as_ptr() as *const i8,
                     instance_handle,
                     input_handle,
-                    output_handle
+                    output_handle,
                 );
                 dbg!(status, Box::from_raw(output_handle as *mut OfxHandle));
+
+                // Save?
+                let instance = &mut *(instance_handle as *mut OfxHandle);
+                if let instance::OfxHandleTarget::BabaFx(baba) = &mut instance.target {
+                    dbg!(&baba);
+                    for (name, clip) in baba.clips.iter_mut() {
+                        // 1. Retrieve the raw pointer you stored in the Output clip's PropertySet
+                        let raw_ptr: *mut c_void = clip
+                            .get_propeties_mut()
+                            .pointers
+                            .get("OfxImagePropData")
+                            .unwrap()[0];
+
+                        // 2. Define your dimensions (must match what you passed to OfxImagePropBounds)
+                        let width = 720;
+                        let height = 480;
+                        let total_bytes = width * height * 4;
+
+                        // 3. Reconstruct a safe Rust slice over the memory to work with it
+                        let pixel_slice: &[u8] = unsafe {
+                            std::slice::from_raw_parts(raw_ptr as *const u8, total_bytes)
+                        };
+
+                        let binding = pixel_slice.to_vec();
+                        // 2. Wrap the vector in an RgbaImage (which is an alias for ImageBuffer<Rgba<u8>, Vec<u8>>)
+                        if let Some(image) =
+                            image::RgbaImage::from_raw(width as u32, height as u32, binding)
+                        {
+                            // 3. Save it to disk
+                            if let Err(e) = image.save(format!("{name}.png")) {
+                                eprintln!("Failed to save image: {}", e);
+                            }
+                        } else {
+                            eprintln!("Container was not big enough for the specified dimensions.");
+                        }
+                    }
+                }
 
                 dbg!("Action Destroy Instance");
                 let status = main_entry(

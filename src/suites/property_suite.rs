@@ -29,7 +29,7 @@ unsafe extern "C" fn prop_set_pointer(
     };
 
     let idx = index as usize;
-    dbg!(&instance, &idx, &prop_key, value);
+    dbg!(&instance_ptr, &prop_key, &idx, value);
     let entry = instance
         .get_propeties_mut()
         .pointers
@@ -38,6 +38,7 @@ unsafe extern "C" fn prop_set_pointer(
 
     // Ensure the vector is large enough to accommodate the incoming index
     if idx >= entry.len() {
+        dbg!("Resizing", idx, entry.len());
         entry.resize(idx + 1, std::ptr::null_mut());
     }
     entry[idx] = value;
@@ -78,8 +79,8 @@ unsafe extern "C" fn prop_set_string(
         }
     };
 
-    dbg!(&prop_key, &index);
     let idx = index as usize;
+    dbg!(&instance_ptr, &prop_key, &idx, &prop_value);
     let entry = instance
         .get_propeties_mut()
         .strings
@@ -88,6 +89,7 @@ unsafe extern "C" fn prop_set_string(
 
     // Ensure the vector is large enough to accommodate the incoming index
     if idx >= entry.len() {
+        dbg!("Resizing", idx, entry.len());
         entry.resize(idx + 1, String::new());
     }
     entry[idx] = prop_value;
@@ -119,8 +121,8 @@ unsafe extern "C" fn prop_set_double(
         }
     };
 
-    dbg!(&prop_key, &index);
     let idx = index as usize;
+    dbg!(&instance_ptr, &prop_key, &idx, &value);
     let entry = instance
         .get_propeties_mut()
         .doubles
@@ -129,6 +131,7 @@ unsafe extern "C" fn prop_set_double(
 
     // Ensure the vector is large enough to accommodate the incoming index
     if idx >= entry.len() {
+        dbg!("Resizing", idx, entry.len());
         entry.resize(idx + 1, 0_f64);
     }
     entry[idx] = value;
@@ -160,8 +163,8 @@ unsafe extern "C" fn prop_set_int(
         }
     };
 
-    dbg!(&prop_key, &index);
     let idx = index as usize;
+    dbg!(&instance_ptr, &prop_key, &idx, &value);
     let entry = instance
         .get_propeties_mut()
         .ints
@@ -170,6 +173,7 @@ unsafe extern "C" fn prop_set_int(
 
     // Ensure the vector is large enough to accommodate the incoming index
     if idx >= entry.len() {
+        dbg!("Resizing", idx, entry.len());
         entry.resize(idx + 1, 0);
     }
     entry[idx] = value;
@@ -223,7 +227,7 @@ unsafe extern "C" fn prop_set_double_n(
         }
     };
 
-    dbg!(&instance, &prop_key);
+    dbg!(&instance_ptr, &prop_key, &count, &value);
     let entry = instance
         .get_propeties_mut()
         .doubles
@@ -234,6 +238,7 @@ unsafe extern "C" fn prop_set_double_n(
 
     // Ensure the vector is large enough to accommodate the incoming index
     if entry.len() < incoming_values.len() {
+        dbg!("Resizing", incoming_values.len(), entry.len());
         entry.resize(incoming_values.len(), 0_f64);
     }
 
@@ -277,8 +282,8 @@ unsafe extern "C" fn prop_get_pointer(
         }
     };
 
-    dbg!(&prop_key, &index);
     let idx = index as usize;
+    dbg!(&instance_ptr, &prop_key, &idx, &value);
     let entry = instance
         .get_propeties_mut()
         .pointers
@@ -323,10 +328,9 @@ unsafe extern "C" fn prop_get_string(
             return 1; // kOfxStatFailed
         }
     };
-    dbg!(&instance, &prop_key, &index);
 
-    dbg!(&prop_key, &index);
     let idx = index as usize;
+    dbg!(&instance_ptr, &prop_key, &idx, &value);
     let entry = instance
         .get_propeties_mut()
         .strings
@@ -372,8 +376,8 @@ unsafe extern "C" fn prop_get_double(
         }
     };
 
-    dbg!(&instance, index, &prop_key);
     let idx = index as usize;
+    dbg!(&instance_ptr, &prop_key, &idx, &value);
     let entry = instance
         .get_propeties_mut()
         .doubles
@@ -418,8 +422,8 @@ unsafe extern "C" fn prop_get_int(
         }
     };
 
-    dbg!(&instance, index, &prop_key);
     let idx = index as usize;
+    dbg!(&instance_ptr, &prop_key, &idx, &value);
     let entry = instance
         .get_propeties_mut()
         .ints
@@ -486,7 +490,7 @@ unsafe extern "C" fn prop_get_double_n(
         }
     };
 
-    dbg!(&instance, &prop_key);
+    dbg!(&instance_ptr, &prop_key, &count, &value);
     let entry = instance
         .get_propeties_mut()
         .doubles
@@ -494,6 +498,7 @@ unsafe extern "C" fn prop_get_double_n(
         .or_insert_with(Vec::new);
 
     if count as usize >= entry.len() {
+        dbg!("Resizing", count, entry.len());
         entry.resize(count as usize, 0_f64);
     }
 
@@ -527,7 +532,7 @@ unsafe extern "C" fn prop_get_int_n(
         }
     };
 
-    dbg!(&instance, &prop_key);
+    dbg!(&instance_ptr, &prop_key, &count, &value);
     let entry = instance
         .get_propeties_mut()
         .ints
@@ -535,6 +540,7 @@ unsafe extern "C" fn prop_get_int_n(
         .or_insert_with(Vec::new);
 
     if count as usize >= entry.len() {
+        dbg!("Resizing", count, entry.len());
         entry.resize(count as usize, 0);
     }
 
