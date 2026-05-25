@@ -1,4 +1,7 @@
-use std::{collections::HashMap, ffi::{c_int, c_void}};
+use std::{
+    collections::HashMap,
+    ffi::{c_int, c_void},
+};
 
 #[derive(Debug)]
 pub struct PropertySet {
@@ -25,11 +28,13 @@ impl Default for PropertySet {
     }
 }
 
+#[allow(dead_code)]
 pub trait AsPropertySet {
     fn get_properties(&self) -> &PropertySet;
     fn get_properties_mut(&mut self) -> &mut PropertySet;
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct ParameterThing {
     pub name: String,
@@ -62,6 +67,7 @@ impl AsPropertySet for ParameterThing {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct ClipThing {
     pub name: String,
@@ -159,8 +165,23 @@ impl OfxHandle {
                 property_set.get_properties_mut()
             }
             OfxHandleTarget::BabaFx(babafx_instance) => babafx_instance.get_properties_mut(),
-            OfxHandleTarget::ParameterThing(parameter_thing) => parameter_thing.get_properties_mut(),
+            OfxHandleTarget::ParameterThing(parameter_thing) => {
+                parameter_thing.get_properties_mut()
+            }
             OfxHandleTarget::ClipThing(clip_thing) => clip_thing.get_properties_mut(),
         }
     }
+}
+
+#[allow(dead_code)]
+pub unsafe fn ptr_as_ofx_handle<'a, T>(pointer: &'a *const T) -> &'a OfxHandle {
+    let instance_ptr = *pointer as *const OfxHandle;
+    let instance = unsafe { &*instance_ptr };
+    instance
+}
+
+pub unsafe fn ptr_as_ofx_handle_mut<'a, T>(pointer: &'a *mut T) -> &'a mut OfxHandle {
+    let instance_ptr = *pointer as *mut OfxHandle;
+    let instance = unsafe { &mut *instance_ptr };
+    instance
 }

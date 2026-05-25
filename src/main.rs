@@ -1,6 +1,6 @@
 #![feature(c_variadic)]
-#![feature(box_as_ptr)]
 use libloading::Symbol;
+use tracing::{debug, error, instrument, trace};
 
 pub mod bindings {
     #![allow(unsafe_op_in_unsafe_fn)]
@@ -13,6 +13,7 @@ pub mod bindings {
 }
 
 mod instance;
+mod log_utils;
 mod suites;
 
 use std::ffi::{CStr, c_char, c_void};
@@ -20,6 +21,7 @@ use std::ffi::{CStr, c_char, c_void};
 use crate::{
     bindings::root::OfxPropertySetStruct,
     instance::{AsPropertySet, BabafxInstance, OfxHandle},
+    log_utils::c_str_to_str,
     suites::{
         image_effect_suite::image_effect_suite, interact_suite::interact_suite,
         memory_suite::memory_suite, message_suite::message_suite,
@@ -28,6 +30,7 @@ use crate::{
     },
 };
 
+#[instrument(level = "trace", ret(level = "trace"), fields(suite_name = c_str_to_str(suite_name)))]
 unsafe extern "C" fn host_fetch_suite(
     _host: *mut bindings::root::OfxPropertySetStruct,
     suite_name: *const c_char,
@@ -89,7 +92,7 @@ unsafe extern "C" fn host_fetch_suite(
             suite_ptr
         }
         (name, suite_version) => {
-            eprintln!("Not implemented: (\"{name}\", {suite_version})");
+            error!("Not implemented: (\"{name}\", {suite_version})");
 
             std::ptr::null()
         }
@@ -97,18 +100,28 @@ unsafe extern "C" fn host_fetch_suite(
 }
 
 fn main() {
+    let env_filter = tracing_subscriber::filter::EnvFilter::from_default_env();
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        .with_env_filter(env_filter)
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+        // .with_max_level(tracing::Level::TRACE)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     unsafe {
         // Load ofx file
-        // let lib = libloading::Library::new("/home/babakinha/Downloads/ofx/fasd/openfx_plugins-linux-ubuntu-35fcf0be/example-Invert.ofx.bundle/Contents/Linux-x86-64/example-Invert.ofx").unwrap();
-        // let lib = libloading::Library::new("/home/babakinha/Downloads/ofx/fasd/openfx_plugins-linux-ubuntu-35fcf0be/example-Rectangle.ofx.bundle/Contents/Linux-x86-64/example-Rectangle.ofx").unwrap();
-        let lib = libloading::Library::new("/home/babakinha/dev/clones/openfx/build/Examples/example-Rectangle.ofx").unwrap();
+        let lib = libloading::Library::new(
+            "/home/babakinha/dev/clones/openfx/build/Examples/example-Rectangle.ofx",
+        )
+        .unwrap();
 
         // Get plugins
         let get_num_plugins: Symbol<unsafe extern "C" fn() -> i32> =
             lib.get(b"OfxGetNumberOfPlugins\0").unwrap();
 
+        trace!("OfxGetNumberOfPlugins");
         let num_plugins = get_num_plugins();
-        println!("Found {} plugins in this binary", num_plugins);
+        debug!("get_num_plugins() = {num_plugins}");
 
         // Fetch each plugin
         let get_plugin: Symbol<unsafe extern "C" fn(i32) -> *mut bindings::root::OfxPlugin> =
@@ -117,6 +130,7 @@ fn main() {
         let mut plugin_ptrs = Vec::new();
         for plugin_id in 0..num_plugins {
             let plugin_ptr = get_plugin(plugin_id);
+            trace!("OfxGetPlugin({plugin_id}) = {plugin_ptr:?}");
             plugin_ptrs.push(plugin_ptr);
         }
 
@@ -132,6 +146,7 @@ fn main() {
 
             // Set host
             if let Some(set_host) = plugin.setHost {
+                trace!("plugin ({plugin_ptr:?}): set_host(&mut {host_definition:?})");
                 set_host(&mut host_definition);
             }
 
@@ -150,10 +165,10 @@ fn main() {
 
                 let instance_handle = Box::into_raw(instance) as *const c_void;
 
-                dbg!(instance_handle);
+                debug!("instance_handle = {:?}", instance_handle);
 
                 // Trigger Load Action
-                dbg!("Action Load");
+                trace!("Action Load");
                 let status = main_entry(
                     bindings::root::kOfxActionLoad.as_ptr() as *const i8,
                     instance_handle,
@@ -161,17 +176,17 @@ fn main() {
                     std::ptr::null_mut(), // TODO: point to real data
                 );
 
-                dbg!(status);
+                debug!("status = {}", status);
 
                 // Trigger Image Effect Action Describe
-                dbg!("Action Describe");
+                trace!("Action Describe");
                 let status = main_entry(
                     bindings::root::kOfxActionDescribe.as_ptr() as *const i8,
                     instance_handle,
                     std::ptr::null_mut(), // TODO: point to real data
                     std::ptr::null_mut(), // TODO: point to real data
                 );
-                dbg!(status);
+                debug!("status = {}", status);
 
                 // Trigger Image Effect Action Describe
                 let mut properties = Box::new(instance::OfxHandle {
@@ -189,29 +204,29 @@ fn main() {
                 }
                 let properties_handle = Box::into_raw(properties) as *mut OfxPropertySetStruct;
 
-                dbg!("Image Effect Action Describe In Context");
+                trace!("Image Effect Action Describe In Context");
                 let status = main_entry(
                     bindings::root::kOfxImageEffectActionDescribeInContext.as_ptr() as *const i8,
                     instance_handle,
                     properties_handle,
                     std::ptr::null_mut(), // TODO: point to real data
                 );
-                dbg!(status);
+                debug!("status = {}", status);
 
                 let _reclaimed = Box::from_raw(properties_handle as *mut OfxHandle);
 
                 // Trigger Action Create Instance
-                dbg!("Action Create Instance");
+                trace!("Action Create Instance");
                 let status = main_entry(
                     bindings::root::kOfxActionCreateInstance.as_ptr() as *const i8,
                     instance_handle,
                     std::ptr::null_mut(), // TODO: point to real data
                     std::ptr::null_mut(), // TODO: point to real data
                 );
-                dbg!(status);
+                debug!("status = {}", status);
 
-                dbg!("Image Effect Action Get Clip Preferences");
-                let mut output = Box::new(instance::OfxHandle {
+                trace!("Image Effect Action Get Clip Preferences");
+                let output = Box::new(instance::OfxHandle {
                     target: instance::OfxHandleTarget::StandalonePropertySet(
                         instance::StandalonePropertySet::new(),
                     ),
@@ -224,9 +239,13 @@ fn main() {
                     output_handle,
                     // std::ptr::null_mut(), // TODO: point to real data
                 );
-                dbg!(status, Box::from_raw(output_handle as *mut OfxHandle));
+                debug!(
+                    "status = {}, output = {:#?}",
+                    status,
+                    Box::from_raw(output_handle as *mut OfxHandle)
+                );
 
-                dbg!("Image Effect Action Get Region Of Definition");
+                trace!("Image Effect Action Get Region Of Definition");
                 let mut input = Box::new(instance::OfxHandle {
                     target: instance::OfxHandleTarget::StandalonePropertySet(
                         instance::StandalonePropertySet::new(),
@@ -238,7 +257,7 @@ fn main() {
                         .insert(String::from("OfxPropTime"), vec![1.0]);
                 }
                 let input_handle = Box::into_raw(input) as *mut OfxPropertySetStruct;
-                let mut output = Box::new(instance::OfxHandle {
+                let output = Box::new(instance::OfxHandle {
                     target: instance::OfxHandleTarget::StandalonePropertySet(
                         instance::StandalonePropertySet::new(),
                     ),
@@ -251,24 +270,30 @@ fn main() {
                     input_handle,
                     output_handle,
                 );
-                dbg!(status, Box::from_raw(output_handle as *mut OfxHandle));
+                debug!(
+                    "status = {}, output = {:#?}",
+                    status,
+                    Box::from_raw(output_handle as *mut OfxHandle)
+                );
 
-                dbg!("Image Effect Action Get Region Of Interest");
+                trace!("Image Effect Action Get Region Of Interest");
                 let mut input = Box::new(instance::OfxHandle {
                     target: instance::OfxHandleTarget::StandalonePropertySet(
                         instance::StandalonePropertySet::new(),
                     ),
                 });
                 if let instance::OfxHandleTarget::StandalonePropertySet(inp) = &mut input.target {
-                    inp.get_properties_mut()
-                        .doubles
-                        .insert(String::from("OfxImageEffectPropRegionOfInterest"), vec![0.0, 0.0, 0.8, 0.8]);
-                    inp.get_properties_mut()
-                        .doubles
-                        .insert(String::from("OfxImageClipPropRoI_Source"), vec![0.0, 0.0, 0.8, 0.8]);
+                    inp.get_properties_mut().doubles.insert(
+                        String::from("OfxImageEffectPropRegionOfInterest"),
+                        vec![0.0, 0.0, 0.8, 0.8],
+                    );
+                    inp.get_properties_mut().doubles.insert(
+                        String::from("OfxImageClipPropRoI_Source"),
+                        vec![0.0, 0.0, 0.8, 0.8],
+                    );
                 }
                 let input_handle = Box::into_raw(input) as *mut OfxPropertySetStruct;
-                let mut output = Box::new(instance::OfxHandle {
+                let output = Box::new(instance::OfxHandle {
                     target: instance::OfxHandleTarget::StandalonePropertySet(
                         instance::StandalonePropertySet::new(),
                     ),
@@ -280,9 +305,13 @@ fn main() {
                     input_handle,
                     output_handle,
                 );
-                dbg!(status, Box::from_raw(output_handle as *mut OfxHandle));
+                debug!(
+                    "status = {}, output = {:#?}",
+                    status,
+                    Box::from_raw(output_handle as *mut OfxHandle)
+                );
 
-                dbg!("Image Effect Action Render");
+                trace!("Image Effect Action Render");
                 let mut input = Box::new(instance::OfxHandle {
                     target: instance::OfxHandleTarget::StandalonePropertySet(
                         instance::StandalonePropertySet::new(),
@@ -292,15 +321,17 @@ fn main() {
                     inp.get_properties_mut()
                         .doubles
                         .insert(String::from("OfxPropTime"), vec![1.0]);
-                    inp.get_properties_mut()
-                        .doubles
-                        .insert(String::from("OfxImageEffectPropRenderScale"), vec![720.0, 480.0]);
-                    inp.get_properties_mut()
-                        .ints
-                        .insert(String::from("OfxImageEffectPropRenderWindow"), vec![0, 0, 720, 480]);
+                    inp.get_properties_mut().doubles.insert(
+                        String::from("OfxImageEffectPropRenderScale"),
+                        vec![720.0, 480.0],
+                    );
+                    inp.get_properties_mut().ints.insert(
+                        String::from("OfxImageEffectPropRenderWindow"),
+                        vec![0, 0, 720, 480],
+                    );
                 }
                 let input_handle = Box::into_raw(input) as *mut OfxPropertySetStruct;
-                let mut output = Box::new(instance::OfxHandle {
+                let output = Box::new(instance::OfxHandle {
                     target: instance::OfxHandleTarget::StandalonePropertySet(
                         instance::StandalonePropertySet::new(),
                     ),
@@ -312,12 +343,16 @@ fn main() {
                     input_handle,
                     output_handle,
                 );
-                dbg!(status, Box::from_raw(output_handle as *mut OfxHandle));
+                debug!(
+                    "status = {}, output = {:#?}",
+                    status,
+                    Box::from_raw(output_handle as *mut OfxHandle)
+                );
 
                 // Save?
                 let instance = &mut *(instance_handle as *mut OfxHandle);
                 if let instance::OfxHandleTarget::BabaFx(baba) = &mut instance.target {
-                    dbg!(&baba);
+                    debug!("baba: {:#?}", &baba);
                     for (name, clip) in baba.clips.iter_mut() {
                         // 1. Retrieve the raw pointer you stored in the Output clip's PropertySet
                         let raw_ptr: *mut c_void = clip
@@ -332,9 +367,8 @@ fn main() {
                         let total_bytes = width * height * 4;
 
                         // 3. Reconstruct a safe Rust slice over the memory to work with it
-                        let pixel_slice: &[u8] = unsafe {
-                            std::slice::from_raw_parts(raw_ptr as *const u8, total_bytes)
-                        };
+                        let pixel_slice: &[u8] =
+                            std::slice::from_raw_parts(raw_ptr as *const u8, total_bytes);
 
                         let binding = pixel_slice.to_vec();
                         // 2. Wrap the vector in an RgbaImage (which is an alias for ImageBuffer<Rgba<u8>, Vec<u8>>)
@@ -343,31 +377,31 @@ fn main() {
                         {
                             // 3. Save it to disk
                             if let Err(e) = image.save(format!("{name}.png")) {
-                                eprintln!("Failed to save image: {}", e);
+                                error!("Failed to save image: {}", e);
                             }
                         } else {
-                            eprintln!("Container was not big enough for the specified dimensions.");
+                            error!("Container was not big enough for the specified dimensions.");
                         }
                     }
                 }
 
-                dbg!("Action Destroy Instance");
+                trace!("Action Destroy Instance");
                 let status = main_entry(
                     bindings::root::kOfxActionDestroyInstance.as_ptr() as *const i8,
                     instance_handle,
                     std::ptr::null_mut(), // TODO: point to real data
                     std::ptr::null_mut(), // TODO: point to real data
                 );
-                dbg!(status);
+                debug!("status = {}", status);
 
-                dbg!("Action Unload");
+                trace!("Action Unload");
                 let status = main_entry(
                     bindings::root::kOfxActionUnload.as_ptr() as *const i8,
                     instance_handle,
                     std::ptr::null_mut(), // TODO: point to real data
                     std::ptr::null_mut(), // TODO: point to real data
                 );
-                dbg!(status);
+                debug!("status = {}", status);
 
                 let _reclaimed = Box::from_raw(instance_handle as *mut OfxHandle);
             }

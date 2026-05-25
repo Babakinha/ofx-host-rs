@@ -1,4 +1,7 @@
 use std::os::raw::c_char;
+use tracing::error;
+use tracing::instrument;
+
 use crate::bindings::root;
 use crate::bindings::root::OfxStatus;
 
@@ -6,6 +9,7 @@ use crate::bindings::root::OfxStatus;
 // 1. MESSAGING IMPLEMENTATION
 // ==========================================
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn message(
     _handle: *mut std::os::raw::c_void,
     _message_type: *const c_char,
@@ -13,8 +17,7 @@ unsafe extern "C" fn message(
     _format: *const c_char,
     _: ...
 ) -> OfxStatus {
-    dbg!("message");
-    eprintln!("OfxMessageSuiteV1::message called (log formatting not implemented)");
+    error!("OfxMessageSuiteV1::message called");
     0 // kOfxStatOK
 }
 
@@ -22,8 +25,8 @@ unsafe extern "C" fn message(
 // SUITE BUILDER
 // ==========================================
 
+#[instrument(level = "trace", ret(level = "trace"))]
 pub fn message_suite() -> root::OfxMessageSuiteV1 {
-    dbg!("message_suite");
     root::OfxMessageSuiteV1 {
         message: Some(message),
     }

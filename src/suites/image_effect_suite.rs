@@ -1,16 +1,16 @@
 use crate::bindings::root::{
-    self, OfxImageClipStruct, OfxParamSetStruct, OfxPropertySetStruct, kOfxImageComponentRGBA,
-    kOfxStatOK,
+    self, OfxImageClipStruct, OfxParamSetStruct, OfxPropertySetStruct, kOfxStatOK,
 };
 use crate::bindings::root::{
     OfxImageClipHandle, OfxImageEffectHandle, OfxImageMemoryHandle, OfxParamSetHandle,
     OfxPropertySetHandle, OfxRectD, OfxStatus, OfxTime,
 };
-use crate::instance::{self, AsPropertySet, OfxHandle, PropertySet};
+use crate::instance::{self, OfxHandle, PropertySet, ptr_as_ofx_handle_mut};
+use crate::log_utils::c_str_to_str;
 use std::alloc::{Layout, alloc, dealloc};
-use std::collections::HashMap;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
+use tracing::{error, instrument, warn};
 
 const IMAGE_ALIGNMENT: usize = 16;
 
@@ -25,13 +25,13 @@ struct ImageMemoryHeader {
 // 1. INSTANCE PROPERTY & PARAMETER HOOKS
 // ==========================================
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn get_property_set(
     image_effect: OfxImageEffectHandle,
     prop_handle: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    dbg!("get_property_set");
     if image_effect.is_null() || prop_handle.is_null() {
-        eprintln!("getPropertySet received a NULL handle");
+        error!("getPropertySet received a NULL handle");
         return 4; // kOfxStatErrBadHandle
     }
 
@@ -47,13 +47,13 @@ unsafe extern "C" fn get_property_set(
     kOfxStatOK as i32
 }
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn get_param_set(
     image_effect: OfxImageEffectHandle,
     param_set: *mut OfxParamSetHandle,
 ) -> OfxStatus {
-    dbg!("get_param_set");
     if image_effect.is_null() || param_set.is_null() {
-        eprintln!("getParameterSet received a NULL handle");
+        error!("getParameterSet received a NULL handle");
         return 4; // kOfxStatErrBadHandle
     }
 
@@ -73,14 +73,13 @@ unsafe extern "C" fn get_param_set(
 // 2. VIDEO CLIP LIFE-CYCLE & RENDERING
 // ==========================================
 
+#[instrument(level = "trace", ret(level = "trace"), fields(name = c_str_to_str(name)))]
 unsafe extern "C" fn clip_define(
     image_effect: OfxImageEffectHandle,
     name: *const c_char,
     property_set: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    dbg!("clip_define");
-    let instance_ptr = image_effect as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { ptr_as_ofx_handle_mut(&image_effect) };
 
     match &mut instance.target {
         crate::instance::OfxHandleTarget::BabaFx(babafx_instance) => {
@@ -88,11 +87,10 @@ unsafe extern "C" fn clip_define(
             let name_str = match c_str.to_str() {
                 Ok(s) => s.to_string(),
                 Err(_) => {
-                    dbg!("Error");
+                    error!("Error");
                     return 1;
                 } // kOfxStatFailed
             };
-            dbg!(&instance_ptr, &name_str, &property_set);
 
             babafx_instance.clips.insert(
                 name_str.clone(),
@@ -104,7 +102,7 @@ unsafe extern "C" fn clip_define(
                                 let width: i32 = 720;
                                 let height: i32 = 480;
                                 let bytes_per_pixel = 4;
-                                let total_bytes =
+                                let _total_bytes =
                                     width as usize * height as usize * bytes_per_pixel as usize; // 1,382,400 bytes
 
                                 let mut set = PropertySet::new();
@@ -185,19 +183,19 @@ unsafe extern "C" fn clip_define(
             return 0;
         }
         _ => {
-            dbg!("Error");
+            error!("Error");
             return 1;
         } // kOfxStatFailed
     }
 }
 
+#[instrument(level = "trace", ret(level = "trace"), fields(name = c_str_to_str(name)))]
 unsafe extern "C" fn clip_get_handle(
     image_effect: OfxImageEffectHandle,
     name: *const c_char,
     clip: *mut OfxImageClipHandle,
     property_set: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    dbg!("clip_get_handle");
     let instance_ptr = image_effect as *mut OfxHandle;
     let instance = unsafe { &mut *instance_ptr };
 
@@ -205,12 +203,10 @@ unsafe extern "C" fn clip_get_handle(
     let name_str = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
-            dbg!("Error");
+            error!("Error");
             return 1;
         } // kOfxStatFailed
     };
-
-    dbg!(&instance_ptr, &name_str, &clip, &property_set);
 
     if let instance::OfxHandleTarget::BabaFx(babafx) = &mut instance.target {
         if let Some(clip_instance) = babafx.clips.get_mut(&name_str) {
@@ -227,27 +223,25 @@ unsafe extern "C" fn clip_get_handle(
                 }
             }
         } else {
-            dbg!("Error");
+            error!("Error");
             return 1;
         }
     } else {
-        dbg!("Error");
+        error!("Error");
         return 1; // Error
     }
 
     0
 }
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn clip_get_property_set(
     clip: OfxImageClipHandle,
     prop_handle: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    dbg!("clip_get_property_set");
-
     // TODO: uhm... idk if this is right...
     let instance_ptr = clip as *mut OfxHandle;
     // let instance = unsafe { &mut *instance_ptr };
-    dbg!(&instance_ptr, &prop_handle);
 
     // let prop_set_ptr = instance.get_propeties_mut() as *mut PropertySet;
     unsafe {
@@ -257,37 +251,34 @@ unsafe extern "C" fn clip_get_property_set(
     kOfxStatOK as i32
 }
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn clip_get_image(
     clip: OfxImageClipHandle,
     _time: OfxTime,
     _region: *const OfxRectD,
     image_handle: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    dbg!("clip_get_image");
-    eprintln!("clip_get_image half implemented");
+    warn!("clip_get_image half implemented");
     let instance_ptr = clip as *mut OfxHandle;
     let instance = unsafe { &mut *instance_ptr };
-
-    dbg!(&clip, &_time, &_region, &image_handle);
 
     if let instance::OfxHandleTarget::ClipThing(_clip) = &mut instance.target {
         unsafe {
             *image_handle = instance_ptr as *mut OfxPropertySetStruct;
         }
     } else {
-        dbg!("Error");
+        error!("Error");
         return 1;
     }
 
     0
 }
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn clip_release_image(image_handle: OfxPropertySetHandle) -> OfxStatus {
-    dbg!("clip_release_image");
-    eprintln!("clip_release_image half implemented");
+    warn!("clip_release_image half implemented");
     let instance_ptr = image_handle as *mut OfxHandle;
     let instance = unsafe { &mut *instance_ptr };
-    dbg!(&instance_ptr);
 
     // 1. Retrieve the raw pointer you stored in the Output clip's PropertySet
     let raw_ptr: *mut c_void = instance
@@ -310,37 +301,32 @@ unsafe extern "C" fn clip_release_image(image_handle: OfxPropertySetHandle) -> O
     if let Some(image) = image::RgbaImage::from_raw(width as u32, height as u32, binding) {
         // 3. Save it to disk
         if let Err(e) = image.save("test.png") {
-            eprintln!("Failed to save image: {}", e);
+            error!("Failed to save image: {}", e);
         }
     } else {
-        eprintln!("Container was not big enough for the specified dimensions.");
+        error!("Container was not big enough for the specified dimensions.");
     }
     0
 }
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn clip_get_region_of_definition(
     clip: OfxImageClipHandle,
     _time: OfxTime,
     bounds: *mut OfxRectD,
 ) -> OfxStatus {
-    dbg!("clip_get_region_of_definition");
-
     if clip.is_null() || bounds.is_null() {
-        dbg!(clip, bounds);
+        error!("Error");
         return 1; // kOfxStatErrBadHandle / kOfxStatErrBadToctx
     }
 
-
     let clip_handle = clip as *mut OfxHandle;
     let instance = unsafe { &*clip_handle };
-
-    dbg!(&clip_handle, &_time, &bounds);
 
     if let instance::OfxHandleTarget::ClipThing(clip_thing) = &instance.target {
         // Look up the integer bounds you stored in this clip when you created it
         if let Some(int_bounds) = clip_thing.properties.ints.get("OfxImagePropBounds") {
             // int_bounds is typically [x1, y1, x2, y2] -> [0, 0, 720, 480]
-            dbg!(&int_bounds);
             unsafe {
                 (*bounds).x1 = int_bounds[0] as f64;
                 (*bounds).y1 = int_bounds[1] as f64;
@@ -351,7 +337,7 @@ unsafe extern "C" fn clip_get_region_of_definition(
         }
     }
 
-    dbg!("Fallback");
+    warn!("Fallback");
     // Fallback if the clip doesn't have bounds populated yet
     unsafe {
         (*bounds).x1 = 0.0;
@@ -367,9 +353,10 @@ unsafe extern "C" fn clip_get_region_of_definition(
 // 3. EXECUTION CONTROL
 // ==========================================
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn abort(_image_effect: OfxImageEffectHandle) -> c_int {
-    dbg!("abort");
     // Return 0 indicating the effect processing thread should continue running safely.
+    error!("abort not implemented");
     0
 }
 
@@ -377,15 +364,15 @@ unsafe extern "C" fn abort(_image_effect: OfxImageEffectHandle) -> c_int {
 // 4. ALIGNED CUSTOM IMAGE POOL ALLOCATOR
 // ==========================================
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn image_memory_alloc(
     _instance_handle: OfxImageEffectHandle,
     n_bytes: usize,
     memory_handle: *mut OfxImageMemoryHandle,
 ) -> OfxStatus {
-    dbg!("image_memory_alloc");
     if memory_handle.is_null() || n_bytes == 0 {
         {
-            dbg!("Error");
+            error!("Error");
             return 1;
         } // kOfxStatFailed
     }
@@ -402,34 +389,36 @@ unsafe extern "C" fn image_memory_alloc(
 
     match Layout::from_size_align(total_size, IMAGE_ALIGNMENT) {
         Ok(layout) => {
-            let raw_ptr = alloc(layout);
-            if raw_ptr.is_null() {
-                *memory_handle = std::ptr::null_mut();
-                return 3; // kOfxStatErrMemory
-            }
-
-            // Write metadata structure header
-            let header_ptr = raw_ptr as *mut ImageMemoryHeader;
             unsafe {
+                let raw_ptr = alloc(layout);
+                if raw_ptr.is_null() {
+                    *memory_handle = std::ptr::null_mut();
+                    return 3; // kOfxStatErrMemory
+                }
+
+                // Write metadata structure header
+                let header_ptr = raw_ptr as *mut ImageMemoryHeader;
                 *header_ptr = ImageMemoryHeader {
                     total_size,
                     lock_count: 0,
                 };
-            }
 
-            // The memory handle returned back to the host system context
-            *memory_handle = raw_ptr as OfxImageMemoryHandle;
+                // The memory handle returned back to the host system context
+                *memory_handle = raw_ptr as OfxImageMemoryHandle;
+            }
             0 // kOfxStatOK
         }
         Err(_) => {
-            *memory_handle = std::ptr::null_mut();
+            unsafe {
+                *memory_handle = std::ptr::null_mut();
+            }
             1
         }
     }
 }
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn image_memory_free(memory_handle: OfxImageMemoryHandle) -> OfxStatus {
-    dbg!("image_memory_free");
     if memory_handle.is_null() {
         return 0; // kOfxStatOK
     }
@@ -439,18 +428,20 @@ unsafe extern "C" fn image_memory_free(memory_handle: OfxImageMemoryHandle) -> O
     let total_size = unsafe { (*header_ptr).total_size };
 
     if let Ok(layout) = Layout::from_size_align(total_size, IMAGE_ALIGNMENT) {
-        dealloc(raw_ptr, layout);
+        unsafe {
+            dealloc(raw_ptr, layout);
+        }
         0 // kOfxStatOK
     } else {
         4 // kOfxStatErrBadHandle
     }
 }
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn image_memory_lock(
     memory_handle: OfxImageMemoryHandle,
     returned_ptr: *mut *mut c_void,
 ) -> OfxStatus {
-    dbg!("image_memory_lock");
     if memory_handle.is_null() || returned_ptr.is_null() {
         return 4; // kOfxStatErrBadHandle
     }
@@ -476,8 +467,8 @@ unsafe extern "C" fn image_memory_lock(
     0
 }
 
+#[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn image_memory_unlock(memory_handle: OfxImageMemoryHandle) -> OfxStatus {
-    dbg!("image_memory_unlock");
     if memory_handle.is_null() {
         return 4;
     }
@@ -497,8 +488,8 @@ unsafe extern "C" fn image_memory_unlock(memory_handle: OfxImageMemoryHandle) ->
 // SUITE BUILDER
 // ==========================================
 
+#[instrument(level = "trace", ret(level = "trace"))]
 pub fn image_effect_suite() -> root::OfxImageEffectSuiteV1 {
-    dbg!("image_effect_suite");
     root::OfxImageEffectSuiteV1 {
         getPropertySet: Some(get_property_set),
         getParamSet: Some(get_param_set),
