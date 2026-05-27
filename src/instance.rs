@@ -3,6 +3,10 @@ use std::{
     ffi::{c_int, c_void},
 };
 
+use crate::bindings::root::{
+    OfxImageClipHandle, OfxImageEffectHandle, OfxParamHandle, OfxPropertySetHandle,
+};
+
 #[derive(Debug)]
 pub struct PropertySet {
     pub strings: HashMap<String, Vec<String>>,
@@ -20,6 +24,22 @@ impl PropertySet {
             pointers: HashMap::new(),
         }
     }
+
+    pub unsafe fn from_ofx_handle<'a>(ptr: OfxPropertySetHandle) -> Box<Self> {
+        unsafe { Box::from_raw(ptr as *mut Self) }
+    }
+
+    pub unsafe fn ref_mut_from_ofx_handle<'a>(ptr: OfxPropertySetHandle) -> Option<&'a mut Self> {
+        unsafe { (ptr as *mut Self).as_mut() }
+    }
+
+    pub fn to_raw_ofx_handle(self: Self) -> OfxPropertySetHandle {
+        Box::into_raw(Box::new(self)) as OfxPropertySetHandle
+    }
+
+    pub unsafe fn as_raw_ofx_handle(&mut self) -> OfxPropertySetHandle {
+        self as *mut Self as OfxPropertySetHandle
+    }
 }
 
 impl Default for PropertySet {
@@ -36,19 +56,50 @@ pub trait AsPropertySet {
 
 #[allow(dead_code)]
 #[derive(Debug)]
+pub enum ParameterValue {
+    Integer(Option<i32>),
+    Integer2D(Option<(i32, i32)>),
+    Integer3D(Option<(i32, i32, i32)>),
+    Double(Option<f64>),
+    Double2D(Option<(f64, f64)>),
+    Double3D(Option<(f64, f64, f64)>),
+    RGB(Option<(f64, f64, f64)>),
+    RGBA(Option<(f64, f64, f64, f64)>),
+    None,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
 pub struct ParameterThing {
     pub name: String,
-    pub param_type: String,
+    pub value: ParameterValue,
     pub properties: PropertySet,
 }
 
+#[allow(dead_code)]
 impl ParameterThing {
     pub fn new() -> Self {
         Self {
             name: String::new(),
-            param_type: String::new(),
+            value: ParameterValue::None,
             properties: PropertySet::new(),
         }
+    }
+
+    pub unsafe fn from_ofx_handle<'a>(ptr: OfxParamHandle) -> Box<Self> {
+        unsafe { Box::from_raw(ptr as *mut Self) }
+    }
+
+    pub unsafe fn ref_mut_from_ofx_handle<'a>(ptr: OfxParamHandle) -> Option<&'a mut Self> {
+        unsafe { (ptr as *mut Self).as_mut() }
+    }
+
+    pub fn to_raw_ofx_handle(self: Self) -> OfxParamHandle {
+        Box::into_raw(Box::new(self)) as OfxParamHandle
+    }
+
+    pub unsafe fn as_raw_ofx_handle(&mut self) -> OfxParamHandle {
+        self as *mut Self as OfxParamHandle
     }
 }
 
@@ -69,48 +120,44 @@ impl AsPropertySet for ParameterThing {
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct ClipThing {
+pub struct ImageClip {
     pub name: String,
     pub properties: PropertySet,
 }
 
-impl ClipThing {
+#[allow(dead_code)]
+impl ImageClip {
     pub fn new() -> Self {
         Self {
             name: String::new(),
             properties: PropertySet::new(),
         }
     }
+
+    pub unsafe fn from_ofx_handle<'a>(ptr: OfxImageClipHandle) -> Box<Self> {
+        unsafe { Box::from_raw(ptr as *mut Self) }
+    }
+
+    pub unsafe fn ref_mut_from_ofx_handle<'a>(ptr: OfxImageClipHandle) -> Option<&'a mut Self> {
+        unsafe { (ptr as *mut Self).as_mut() }
+    }
+
+    pub fn to_raw_ofx_handle(self: Self) -> OfxImageClipHandle {
+        Box::into_raw(Box::new(self)) as OfxImageClipHandle
+    }
+
+    pub unsafe fn as_raw_ofx_handle(&mut self) -> OfxImageClipHandle {
+        self as *mut Self as OfxImageClipHandle
+    }
 }
 
-impl Default for ClipThing {
+impl Default for ImageClip {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AsPropertySet for ClipThing {
-    fn get_properties(&self) -> &PropertySet {
-        &self.properties
-    }
-    fn get_properties_mut(&mut self) -> &mut PropertySet {
-        &mut self.properties
-    }
-}
-#[derive(Debug)]
-pub struct StandalonePropertySet {
-    pub properties: PropertySet,
-}
-
-impl StandalonePropertySet {
-    pub fn new() -> Self {
-        Self {
-            properties: PropertySet::new(),
-        }
-    }
-}
-
-impl AsPropertySet for StandalonePropertySet {
+impl AsPropertySet for ImageClip {
     fn get_properties(&self) -> &PropertySet {
         &self.properties
     }
@@ -122,10 +169,11 @@ impl AsPropertySet for StandalonePropertySet {
 #[derive(Debug)]
 pub struct BabafxInstance {
     pub properties: PropertySet,
-    pub parameters: HashMap<String, Box<OfxHandle>>,
-    pub clips: HashMap<String, Box<OfxHandle>>,
+    pub parameters: HashMap<String, ParameterThing>,
+    pub clips: HashMap<String, ImageClip>,
 }
 
+#[allow(dead_code)]
 impl BabafxInstance {
     pub fn new() -> Self {
         Self {
@@ -133,6 +181,22 @@ impl BabafxInstance {
             parameters: HashMap::new(),
             clips: HashMap::new(),
         }
+    }
+
+    pub unsafe fn from_ofx_handle<'a>(ptr: OfxImageEffectHandle) -> Box<Self> {
+        unsafe { Box::from_raw(ptr as *mut Self) }
+    }
+
+    pub unsafe fn ref_mut_from_ofx_handle<'a>(ptr: OfxImageEffectHandle) -> Option<&'a mut Self> {
+        unsafe { (ptr as *mut Self).as_mut() }
+    }
+
+    pub fn to_raw_ofx_handle(self: Self) -> OfxImageEffectHandle {
+        Box::into_raw(Box::new(self)) as OfxImageEffectHandle
+    }
+
+    pub unsafe fn as_raw_ofx_handle(&mut self) -> OfxImageEffectHandle {
+        self as *mut Self as OfxImageEffectHandle
     }
 }
 
@@ -143,45 +207,4 @@ impl AsPropertySet for BabafxInstance {
     fn get_properties_mut(&mut self) -> &mut PropertySet {
         &mut self.properties
     }
-}
-
-#[derive(Debug)]
-pub enum OfxHandleTarget {
-    StandalonePropertySet(StandalonePropertySet),
-    ParameterThing(ParameterThing),
-    ClipThing(ClipThing),
-    BabaFx(BabafxInstance),
-}
-
-#[derive(Debug)]
-pub struct OfxHandle {
-    pub target: OfxHandleTarget,
-}
-
-impl OfxHandle {
-    pub fn get_propeties_mut(&mut self) -> &mut PropertySet {
-        match &mut self.target {
-            OfxHandleTarget::StandalonePropertySet(property_set) => {
-                property_set.get_properties_mut()
-            }
-            OfxHandleTarget::BabaFx(babafx_instance) => babafx_instance.get_properties_mut(),
-            OfxHandleTarget::ParameterThing(parameter_thing) => {
-                parameter_thing.get_properties_mut()
-            }
-            OfxHandleTarget::ClipThing(clip_thing) => clip_thing.get_properties_mut(),
-        }
-    }
-}
-
-#[allow(dead_code)]
-pub unsafe fn ptr_as_ofx_handle<'a, T>(pointer: &'a *const T) -> &'a OfxHandle {
-    let instance_ptr = *pointer as *const OfxHandle;
-    let instance = unsafe { &*instance_ptr };
-    instance
-}
-
-pub unsafe fn ptr_as_ofx_handle_mut<'a, T>(pointer: &'a *mut T) -> &'a mut OfxHandle {
-    let instance_ptr = *pointer as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
-    instance
 }

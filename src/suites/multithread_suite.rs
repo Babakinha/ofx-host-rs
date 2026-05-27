@@ -1,4 +1,4 @@
-use crate::bindings::root;
+use crate::bindings::root::{self, kOfxStatOK};
 use crate::bindings::root::{OfxMutexHandle, OfxStatus, OfxThreadFunctionV1};
 use std::os::raw::{c_int, c_uint, c_void};
 use tracing::{debug, error, instrument};
@@ -26,8 +26,8 @@ unsafe extern "C" fn multi_thread_num_cpus(n_cpus: *mut c_uint) -> OfxStatus {
     if !n_cpus.is_null() {
         unsafe {
             *n_cpus = 1;
-        } // Safely declare 1 core to prevent divide-by-zero crashes
-        0 // kOfxStatOK
+        }
+        kOfxStatOK as i32
     } else {
         1 // kOfxStatFailed
     }

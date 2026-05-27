@@ -1,5 +1,6 @@
-use crate::bindings::root;
 use crate::bindings::root::OfxStatus;
+use crate::bindings::root::{self};
+use crate::ofx_constants::{kOfxStatErrBadHandle, kOfxStatErrMemory, kOfxStatFailed, kOfxStatOK};
 use std::alloc::{Layout, alloc, dealloc};
 use std::os::raw::c_void;
 use tracing::{error, instrument};
@@ -17,7 +18,7 @@ unsafe extern "C" fn memory_alloc(
     allocated_data: *mut *mut c_void,
 ) -> OfxStatus {
     if allocated_data.is_null() || n_bytes == 0 {
-        return 1; // kOfxStatFailed
+        return kOfxStatFailed;
     }
 
     // We allocate extra space at the front to store the total allocation size
@@ -34,7 +35,7 @@ unsafe extern "C" fn memory_alloc(
                         "OfxMemorySuiteV1: Out of memory trying to allocate {} bytes",
                         n_bytes
                     );
-                    return 3; // kOfxStatErrMemory
+                    return kOfxStatErrMemory;
                 }
 
                 // Write the total size metadata into the hidden prefix area
@@ -44,16 +45,16 @@ unsafe extern "C" fn memory_alloc(
                 let client_ptr = raw_ptr.add(padding);
                 *allocated_data = client_ptr as *mut c_void;
             }
-            0 // kOfxStatOK
+            kOfxStatOK
         }
-        Err(_) => 1, // kOfxStatFailed
+        Err(_) => kOfxStatFailed,
     }
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn memory_free(allocated_data: *mut c_void) -> OfxStatus {
     if allocated_data.is_null() {
-        return 0; // Freeing a null pointer is explicitly allowed and a no-op
+        return kOfxStatOK;
     }
 
     unsafe {
@@ -66,9 +67,9 @@ unsafe extern "C" fn memory_free(allocated_data: *mut c_void) -> OfxStatus {
 
         if let Ok(layout) = Layout::from_size_align(total_size, ALIGNMENT) {
             dealloc(raw_ptr, layout);
-            0 // kOfxStatOK
+            return kOfxStatOK;
         } else {
-            4 // kOfxStatErrBadHandle
+            return kOfxStatErrBadHandle;
         }
     }
 }

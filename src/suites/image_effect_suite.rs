@@ -1,12 +1,11 @@
-use crate::bindings::root::{
-    self, OfxImageClipStruct, OfxParamSetStruct, OfxPropertySetStruct, kOfxStatOK,
-};
+use crate::bindings::root::{self, OfxParamSetStruct};
 use crate::bindings::root::{
     OfxImageClipHandle, OfxImageEffectHandle, OfxImageMemoryHandle, OfxParamSetHandle,
     OfxPropertySetHandle, OfxRectD, OfxStatus, OfxTime,
 };
-use crate::instance::{self, OfxHandle, PropertySet, ptr_as_ofx_handle_mut};
+use crate::instance::{self, AsPropertySet, BabafxInstance, ImageClip, PropertySet};
 use crate::log_utils::c_str_to_str;
+use crate::ofx_constants::{kOfxStatErrBadHandle, kOfxStatErrMemory, kOfxStatFailed, kOfxStatOK};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
@@ -32,19 +31,15 @@ unsafe extern "C" fn get_property_set(
 ) -> OfxStatus {
     if image_effect.is_null() || prop_handle.is_null() {
         error!("getPropertySet received a NULL handle");
-        return 4; // kOfxStatErrBadHandle
+        return kOfxStatErrBadHandle;
     }
+    let instance = unsafe { BabafxInstance::ref_mut_from_ofx_handle(image_effect).unwrap() };
 
-    // TODO: uhm... idk if this is right...
-    let instance_ptr = image_effect as *mut OfxHandle;
-    // let instance = unsafe { &mut *instance_ptr };
-
-    // let prop_set_ptr = instance.get_propeties_mut() as *mut PropertySet;
     unsafe {
-        *prop_handle = instance_ptr as *mut OfxPropertySetStruct;
+        *prop_handle = instance.get_properties_mut().as_raw_ofx_handle();
     }
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -54,19 +49,15 @@ unsafe extern "C" fn get_param_set(
 ) -> OfxStatus {
     if image_effect.is_null() || param_set.is_null() {
         error!("getParameterSet received a NULL handle");
-        return 4; // kOfxStatErrBadHandle
+        return kOfxStatErrBadHandle;
     }
 
     // TODO: uhm... idk if this is right...
-    let instance_ptr = image_effect as *mut OfxHandle;
-    // let instance = unsafe { &mut *instance_ptr };
-
-    // let prop_set_ptr = instance.get_propeties_mut() as *mut PropertySet;
     unsafe {
-        *param_set = instance_ptr as *mut OfxParamSetStruct;
+        *param_set = image_effect as *mut OfxParamSetStruct;
     }
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 // ==========================================
@@ -79,114 +70,103 @@ unsafe extern "C" fn clip_define(
     name: *const c_char,
     property_set: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    let instance = unsafe { ptr_as_ofx_handle_mut(&image_effect) };
+    let instance = unsafe { BabafxInstance::ref_mut_from_ofx_handle(image_effect).unwrap() };
 
-    match &mut instance.target {
-        crate::instance::OfxHandleTarget::BabaFx(babafx_instance) => {
-            let c_str = unsafe { CStr::from_ptr(name) };
-            let name_str = match c_str.to_str() {
-                Ok(s) => s.to_string(),
-                Err(_) => {
-                    error!("Error");
-                    return 1;
-                } // kOfxStatFailed
-            };
-
-            babafx_instance.clips.insert(
-                name_str.clone(),
-                Box::new(OfxHandle {
-                    target: crate::instance::OfxHandleTarget::ClipThing(
-                        crate::instance::ClipThing {
-                            name: name_str.clone(),
-                            properties: {
-                                let width: i32 = 720;
-                                let height: i32 = 480;
-                                let bytes_per_pixel = 4;
-                                let _total_bytes =
-                                    width as usize * height as usize * bytes_per_pixel as usize; // 1,382,400 bytes
-
-                                let mut set = PropertySet::new();
-
-                                // --- Your Existing Setup ---
-                                set.strings.insert(
-                                    "OfxImageEffectPropPreMultiplication".to_string(),
-                                    vec!["OfxImageOpaque".to_string()],
-                                );
-                                set.strings.insert(
-                                    "OfxImageEffectPropPixelDepth".to_string(),
-                                    vec!["OfxBitDepthByte".to_string()],
-                                );
-                                set.strings.insert(
-                                    "OfxImageEffectPropComponents".to_string(),
-                                    vec!["OfxImageComponentRGBA".to_string()],
-                                );
-
-                                // --- The Missing Pieces ---
-
-                                // 1. Image Data Pointer
-                                let pixel_buffer = image::ImageReader::open("input.png")
-                                    .unwrap()
-                                    .decode()
-                                    .unwrap()
-                                    .to_rgba8()
-                                    .into_raw();
-
-                                let pixel_buffer = pixel_buffer.into_boxed_slice();
-                                set.pointers.insert(
-                                    "OfxImagePropData".to_string(),
-                                    vec![Box::into_raw(pixel_buffer) as *mut c_void],
-                                );
-
-                                // 2. Image Bounds [x1, y1, x2, y2]
-                                set.ints.insert(
-                                    "OfxImagePropBounds".to_string(),
-                                    vec![0, 0, width, height],
-                                );
-
-                                // 3. Row Bytes (Stride)
-                                set.ints.insert(
-                                    "OfxImagePropRowBytes".to_string(),
-                                    vec![width * bytes_per_pixel],
-                                );
-
-                                set.doubles.insert(
-                                    "OfxImagePropPixelAspectRatio".to_string(),
-                                    vec![1.0], // Square pixels
-                                );
-
-                                // 4. Interlacing Field Type
-                                set.strings.insert(
-                                    "OfxImagePropField".to_string(),
-                                    vec!["OfxFieldNone".to_string()],
-                                );
-
-                                // 5. Unique Frame Identifier (Cache key)
-                                set.strings.insert(
-                                    "OfxImagePropUniqueIdentifier".to_string(),
-                                    vec!["host_frame_0001".to_string()],
-                                );
-
-                                set
-                            },
-                        },
-                    ),
-                }),
-            );
-
-            if !property_set.is_null() {
-                unsafe {
-                    *property_set = babafx_instance.clips.get_mut(&name_str).unwrap().as_mut()
-                        as *mut _ as *mut OfxPropertySetStruct;
-                }
-            }
-
-            return 0;
-        }
-        _ => {
+    let c_str = unsafe { CStr::from_ptr(name) };
+    let name_str = match c_str.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
             error!("Error");
-            return 1;
-        } // kOfxStatFailed
+            return kOfxStatFailed;
+        }
+    };
+
+    instance.clips.insert(
+        name_str.clone(),
+        crate::instance::ImageClip {
+            name: name_str.clone(),
+            properties: {
+                let width: i32 = 720;
+                let height: i32 = 480;
+                let bytes_per_pixel = 4;
+                let _total_bytes = width as usize * height as usize * bytes_per_pixel as usize;
+
+                let mut set = PropertySet::new();
+
+                // --- Your Existing Setup ---
+                set.strings.insert(
+                    "OfxImageEffectPropPreMultiplication".to_string(),
+                    vec!["OfxImageOpaque".to_string()],
+                );
+                set.strings.insert(
+                    "OfxImageEffectPropPixelDepth".to_string(),
+                    vec!["OfxBitDepthByte".to_string()],
+                );
+                set.strings.insert(
+                    "OfxImageEffectPropComponents".to_string(),
+                    vec!["OfxImageComponentRGBA".to_string()],
+                );
+
+                // --- The Missing Pieces ---
+
+                // 1. Image Data Pointer
+                let pixel_buffer = image::ImageReader::open("input.png")
+                    .unwrap()
+                    .decode()
+                    .unwrap()
+                    .to_rgba8()
+                    .into_raw();
+
+                let pixel_buffer = pixel_buffer.into_boxed_slice();
+                set.pointers.insert(
+                    "OfxImagePropData".to_string(),
+                    vec![Box::into_raw(pixel_buffer) as *mut c_void],
+                );
+
+                // 2. Image Bounds [x1, y1, x2, y2]
+                set.ints
+                    .insert("OfxImagePropBounds".to_string(), vec![0, 0, width, height]);
+
+                // 3. Row Bytes (Stride)
+                set.ints.insert(
+                    "OfxImagePropRowBytes".to_string(),
+                    vec![width * bytes_per_pixel],
+                );
+
+                set.doubles.insert(
+                    "OfxImagePropPixelAspectRatio".to_string(),
+                    vec![1.0], // Square pixels
+                );
+
+                // 4. Interlacing Field Type
+                set.strings.insert(
+                    "OfxImagePropField".to_string(),
+                    vec!["OfxFieldNone".to_string()],
+                );
+
+                // 5. Unique Frame Identifier (Cache key)
+                set.strings.insert(
+                    "OfxImagePropUniqueIdentifier".to_string(),
+                    vec!["host_frame_0001".to_string()],
+                );
+
+                set
+            },
+        },
+    );
+
+    if !property_set.is_null() {
+        unsafe {
+            *property_set = instance
+                .clips
+                .get_mut(&name_str)
+                .unwrap()
+                .get_properties_mut()
+                .as_raw_ofx_handle();
+        }
     }
+
+    return kOfxStatOK;
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(name = c_str_to_str(name)))]
@@ -196,42 +176,35 @@ unsafe extern "C" fn clip_get_handle(
     clip: *mut OfxImageClipHandle,
     property_set: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    let instance_ptr = image_effect as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { BabafxInstance::ref_mut_from_ofx_handle(image_effect).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(name) };
     let name_str = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1;
-        } // kOfxStatFailed
+            return kOfxStatFailed;
+        }
     };
 
-    if let instance::OfxHandleTarget::BabaFx(babafx) = &mut instance.target {
-        if let Some(clip_instance) = babafx.clips.get_mut(&name_str) {
-            if !clip.is_null() {
-                unsafe {
-                    *clip = clip_instance.as_mut() as *mut _ as *mut OfxImageClipStruct;
-                }
+    if let Some(clip_instance) = instance.clips.get_mut(&name_str) {
+        if !clip.is_null() {
+            unsafe {
+                *clip = clip_instance.as_raw_ofx_handle();
             }
+        }
 
-            if !property_set.is_null() {
-                unsafe {
-                    // TODO: Techinically will work... i think?
-                    *property_set = clip_instance.as_mut() as *mut _ as *mut OfxPropertySetStruct;
-                }
+        if !property_set.is_null() {
+            unsafe {
+                *property_set = clip_instance.get_properties_mut().as_raw_ofx_handle();
             }
-        } else {
-            error!("Error");
-            return 1;
         }
     } else {
         error!("Error");
-        return 1; // Error
+        return kOfxStatFailed;
     }
 
-    0
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -239,16 +212,17 @@ unsafe extern "C" fn clip_get_property_set(
     clip: OfxImageClipHandle,
     prop_handle: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    // TODO: uhm... idk if this is right...
-    let instance_ptr = clip as *mut OfxHandle;
-    // let instance = unsafe { &mut *instance_ptr };
+    if clip.is_null() || prop_handle.is_null() {
+        error!("getPropertySet received a NULL handle");
+        return kOfxStatErrBadHandle;
+    }
+    let instance = unsafe { ImageClip::ref_mut_from_ofx_handle(clip).unwrap() };
 
-    // let prop_set_ptr = instance.get_propeties_mut() as *mut PropertySet;
     unsafe {
-        *prop_handle = instance_ptr as *mut OfxPropertySetStruct;
+        *prop_handle = instance.get_properties_mut().as_raw_ofx_handle();
     }
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -259,33 +233,22 @@ unsafe extern "C" fn clip_get_image(
     image_handle: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
     warn!("clip_get_image half implemented");
-    let instance_ptr = clip as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { ImageClip::ref_mut_from_ofx_handle(clip).unwrap() };
 
-    if let instance::OfxHandleTarget::ClipThing(_clip) = &mut instance.target {
-        unsafe {
-            *image_handle = instance_ptr as *mut OfxPropertySetStruct;
-        }
-    } else {
-        error!("Error");
-        return 1;
+    unsafe {
+        *image_handle = instance.get_properties_mut().as_raw_ofx_handle();
     }
 
-    0
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn clip_release_image(image_handle: OfxPropertySetHandle) -> OfxStatus {
     warn!("clip_release_image half implemented");
-    let instance_ptr = image_handle as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(image_handle).unwrap() };
 
     // 1. Retrieve the raw pointer you stored in the Output clip's PropertySet
-    let raw_ptr: *mut c_void = instance
-        .get_propeties_mut()
-        .pointers
-        .get("OfxImagePropData")
-        .unwrap()[0];
+    let raw_ptr: *mut c_void = instance.pointers.get("OfxImagePropData").unwrap()[0];
 
     // 2. Define your dimensions (must match what you passed to OfxImagePropBounds)
     let width = 720;
@@ -306,7 +269,7 @@ unsafe extern "C" fn clip_release_image(image_handle: OfxPropertySetHandle) -> O
     } else {
         error!("Container was not big enough for the specified dimensions.");
     }
-    0
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -317,24 +280,20 @@ unsafe extern "C" fn clip_get_region_of_definition(
 ) -> OfxStatus {
     if clip.is_null() || bounds.is_null() {
         error!("Error");
-        return 1; // kOfxStatErrBadHandle / kOfxStatErrBadToctx
+        return kOfxStatFailed;
     }
 
-    let clip_handle = clip as *mut OfxHandle;
-    let instance = unsafe { &*clip_handle };
+    let instance = unsafe { ImageClip::ref_mut_from_ofx_handle(clip).unwrap() };
 
-    if let instance::OfxHandleTarget::ClipThing(clip_thing) = &instance.target {
-        // Look up the integer bounds you stored in this clip when you created it
-        if let Some(int_bounds) = clip_thing.properties.ints.get("OfxImagePropBounds") {
-            // int_bounds is typically [x1, y1, x2, y2] -> [0, 0, 720, 480]
-            unsafe {
-                (*bounds).x1 = int_bounds[0] as f64;
-                (*bounds).y1 = int_bounds[1] as f64;
-                (*bounds).x2 = int_bounds[2] as f64;
-                (*bounds).y2 = int_bounds[3] as f64;
-            }
-            return 0; // kOfxStatOK
+    if let Some(int_bounds) = instance.properties.ints.get("OfxImagePropBounds") {
+        // int_bounds is typically [x1, y1, x2, y2] -> [0, 0, 720, 480]
+        unsafe {
+            (*bounds).x1 = int_bounds[0] as f64;
+            (*bounds).y1 = int_bounds[1] as f64;
+            (*bounds).x2 = int_bounds[2] as f64;
+            (*bounds).y2 = int_bounds[3] as f64;
         }
+        return kOfxStatOK;
     }
 
     warn!("Fallback");
@@ -346,7 +305,7 @@ unsafe extern "C" fn clip_get_region_of_definition(
         (*bounds).y2 = 480.0;
     }
 
-    0
+    kOfxStatOK
 }
 
 // ==========================================
@@ -373,7 +332,7 @@ unsafe extern "C" fn image_memory_alloc(
     if memory_handle.is_null() || n_bytes == 0 {
         {
             error!("Error");
-            return 1;
+            return kOfxStatFailed;
         } // kOfxStatFailed
     }
 
@@ -393,7 +352,7 @@ unsafe extern "C" fn image_memory_alloc(
                 let raw_ptr = alloc(layout);
                 if raw_ptr.is_null() {
                     *memory_handle = std::ptr::null_mut();
-                    return 3; // kOfxStatErrMemory
+                    return kOfxStatErrMemory;
                 }
 
                 // Write metadata structure header
@@ -406,13 +365,13 @@ unsafe extern "C" fn image_memory_alloc(
                 // The memory handle returned back to the host system context
                 *memory_handle = raw_ptr as OfxImageMemoryHandle;
             }
-            0 // kOfxStatOK
+            return kOfxStatOK;
         }
         Err(_) => {
             unsafe {
                 *memory_handle = std::ptr::null_mut();
             }
-            1
+            kOfxStatFailed
         }
     }
 }
@@ -420,7 +379,7 @@ unsafe extern "C" fn image_memory_alloc(
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn image_memory_free(memory_handle: OfxImageMemoryHandle) -> OfxStatus {
     if memory_handle.is_null() {
-        return 0; // kOfxStatOK
+        return kOfxStatOK;
     }
 
     let raw_ptr = memory_handle as *mut u8;
@@ -431,9 +390,9 @@ unsafe extern "C" fn image_memory_free(memory_handle: OfxImageMemoryHandle) -> O
         unsafe {
             dealloc(raw_ptr, layout);
         }
-        0 // kOfxStatOK
+        kOfxStatOK
     } else {
-        4 // kOfxStatErrBadHandle
+        kOfxStatErrBadHandle
     }
 }
 
@@ -443,7 +402,7 @@ unsafe extern "C" fn image_memory_lock(
     returned_ptr: *mut *mut c_void,
 ) -> OfxStatus {
     if memory_handle.is_null() || returned_ptr.is_null() {
-        return 4; // kOfxStatErrBadHandle
+        return kOfxStatErrBadHandle;
     }
 
     let raw_ptr = memory_handle as *mut u8;
@@ -470,7 +429,7 @@ unsafe extern "C" fn image_memory_lock(
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn image_memory_unlock(memory_handle: OfxImageMemoryHandle) -> OfxStatus {
     if memory_handle.is_null() {
-        return 4;
+        return kOfxStatErrBadHandle;
     }
 
     let raw_ptr = memory_handle as *mut u8;
@@ -481,7 +440,7 @@ unsafe extern "C" fn image_memory_unlock(memory_handle: OfxImageMemoryHandle) ->
             (*header_ptr).lock_count -= 1;
         }
     }
-    0
+    kOfxStatOK
 }
 
 // ==========================================

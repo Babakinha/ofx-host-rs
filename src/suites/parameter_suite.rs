@@ -1,9 +1,10 @@
-use crate::bindings::root::{self, OfxParamStruct, OfxPropertySetStruct};
+use crate::bindings::root::{self, OfxImageEffectHandle};
 use crate::bindings::root::{
     OfxParamHandle, OfxParamSetHandle, OfxPropertySetHandle, OfxRangeD, OfxStatus, OfxTime,
 };
-use crate::instance::{self, OfxHandle, PropertySet};
+use crate::instance::{self, AsPropertySet, BabafxInstance, ParameterValue, PropertySet};
 use crate::log_utils::c_str_to_str;
+use crate::ofx_constants::{kOfxStatErrBadHandle, kOfxStatOK};
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_uint};
 use tracing::error;
@@ -20,60 +21,59 @@ unsafe extern "C" fn param_define(
     name: *const c_char,
     property_set: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    let instance_ptr = param_set as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe {
+        BabafxInstance::ref_mut_from_ofx_handle(param_set as OfxImageEffectHandle).unwrap()
+    };
 
-    match &mut instance.target {
-        crate::instance::OfxHandleTarget::BabaFx(babafx_instance) => {
-            let c_str = unsafe { CStr::from_ptr(param_type) };
-            let param_type_str = match c_str.to_str() {
-                Ok(s) => s.to_string(),
-                Err(_) => {
-                    error!("Error");
-                    return 1;
-                } // kOfxStatFailed
-            };
-
-            let c_str = unsafe { CStr::from_ptr(name) };
-            let name_str = match c_str.to_str() {
-                Ok(s) => s.to_string(),
-                Err(_) => {
-                    error!("Error");
-                    return 1;
-                } // kOfxStatFailed
-            };
-
-            babafx_instance.parameters.insert(
-                name_str.clone(),
-                Box::new(OfxHandle {
-                    target: crate::instance::OfxHandleTarget::ParameterThing(
-                        crate::instance::ParameterThing {
-                            name: name_str.clone(),
-                            param_type: param_type_str,
-                            properties: PropertySet::new(),
-                        },
-                    ),
-                }),
-            );
-
-            if !property_set.is_null() {
-                unsafe {
-                    *property_set = babafx_instance
-                        .parameters
-                        .get_mut(&name_str)
-                        .unwrap()
-                        .as_mut() as *mut _
-                        as *mut OfxPropertySetStruct;
-                }
-            }
-
-            return 0;
-        }
-        _ => {
+    let c_str = unsafe { CStr::from_ptr(param_type) };
+    let param_type_str = match c_str.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
             error!("Error");
             return 1;
-        } // kOfxStatFailed
+        }
+    };
+
+    let c_str = unsafe { CStr::from_ptr(name) };
+    let name_str = match c_str.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            error!("Error");
+            return 1;
+        }
+    };
+
+    instance.parameters.insert(
+        name_str.clone(),
+        crate::instance::ParameterThing {
+            name: name_str.clone(),
+            value: match param_type_str.as_str() {
+                "OfxParamTypeInteger" => instance::ParameterValue::Integer(None),
+                "OfxParamTypeInteger2D" => instance::ParameterValue::Integer2D(None),
+                "OfxParamTypeInteger3D" => instance::ParameterValue::Integer3D(None),
+                "OfxParamTypeDouble" => instance::ParameterValue::Double(None),
+                "OfxParamTypeDouble2D" => instance::ParameterValue::Double2D(None),
+                "OfxParamTypeDouble3D" => instance::ParameterValue::Double3D(None),
+                "OfxParamTypeRGB" => instance::ParameterValue::RGB(None),
+                "OfxParamTypeRGBA" => instance::ParameterValue::RGBA(None),
+                _ => instance::ParameterValue::None,
+            },
+            properties: PropertySet::new(),
+        },
+    );
+
+    if !property_set.is_null() {
+        unsafe {
+            *property_set = instance
+                .parameters
+                .get_mut(&name_str)
+                .unwrap()
+                .get_properties_mut()
+                .as_raw_ofx_handle();
+        }
     }
+
+    return 0;
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(name = c_str_to_str(name)))]
@@ -83,8 +83,9 @@ unsafe extern "C" fn param_get_handle(
     param: *mut OfxParamHandle,
     property_set: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    let instance_ptr = param_set as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe {
+        BabafxInstance::ref_mut_from_ofx_handle(param_set as OfxImageEffectHandle).unwrap()
+    };
 
     let c_str = unsafe { CStr::from_ptr(name) };
     let name_str = match c_str.to_str() {
@@ -92,42 +93,47 @@ unsafe extern "C" fn param_get_handle(
         Err(_) => {
             error!("Error");
             return 1;
-        } // kOfxStatFailed
+        }
     };
 
-    if let instance::OfxHandleTarget::BabaFx(babafx) = &mut instance.target {
-        if let Some(parameter) = babafx.parameters.get_mut(&name_str) {
-            if !param.is_null() {
-                unsafe {
-                    *param = parameter.as_mut() as *mut _ as *mut OfxParamStruct;
-                }
+    if let Some(parameter) = instance.parameters.get_mut(&name_str) {
+        if !param.is_null() {
+            unsafe {
+                *param = parameter.as_raw_ofx_handle();
             }
+        }
 
-            if !property_set.is_null() {
-                unsafe {
-                    // TODO: Techinically will work... i think?
-                    *property_set = parameter.as_mut() as *mut _ as *mut OfxPropertySetStruct;
-                }
+        if !property_set.is_null() {
+            unsafe {
+                *property_set = parameter.get_properties_mut().as_raw_ofx_handle();
             }
-        } else {
-            error!("Error");
-            return 1;
         }
     } else {
         error!("Error");
-        return 1; // Error
+        return 1;
     }
 
-    0
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn param_set_get_property_set(
-    _param_set: OfxParamSetHandle,
-    _prop_handle: *mut OfxPropertySetHandle,
+    param_set: OfxParamSetHandle,
+    prop_handle: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    error!("paramSetGetPropertySet not implemented");
-    2
+    if param_set.is_null() || prop_handle.is_null() {
+        error!("getPropertySet received a NULL handle");
+        return kOfxStatErrBadHandle;
+    }
+    let instance = unsafe {
+        BabafxInstance::ref_mut_from_ofx_handle(param_set as OfxImageEffectHandle).unwrap()
+    };
+
+    unsafe {
+        *prop_handle = instance.get_properties_mut().as_raw_ofx_handle();
+    }
+
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -157,61 +163,197 @@ unsafe extern "C" fn param_get_value_at_time(
 ) -> OfxStatus {
     warn!("param_get_value_at_time half implemented");
 
-    let instance_ptr = param_handle as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance =
+        unsafe { instance::ParameterThing::ref_mut_from_ofx_handle(param_handle).unwrap() };
 
-    if let instance::OfxHandleTarget::ParameterThing(param) = &mut instance.target {
-        match param.param_type.as_str() {
-            "OfxParamTypeDouble2D" => {
-                unsafe {
-                    // Pull two separate pointers off the variadic stack frame
-                    let x_ptr = args.next_arg::<*mut f64>();
-                    let y_ptr = args.next_arg::<*mut f64>();
+    let or_default_int = |index| {
+        *(instance
+            .properties
+            .ints
+            .get("OfxParamPropDefault")
+            .unwrap_or(&vec![])
+            .get(index)
+            .unwrap_or(&0))
+    };
 
-                    if x_ptr.is_null() || y_ptr.is_null() {
-                        error!("Error");
-                        return 1; // kOfxStatErrBadHandle
-                    }
+    let or_default_double = |index| {
+        *(instance
+            .properties
+            .doubles
+            .get("OfxParamPropDefault")
+            .unwrap_or(&vec![])
+            .get(index)
+            .unwrap_or(&0.0))
+    };
+    match instance.value {
+        ParameterValue::Integer(x) => {
+            unsafe {
+                // Pull two separate pointers off the variadic stack frame
+                let x_ptr = args.next_arg::<*mut i32>();
 
-                    if let Some(vals) = param.properties.doubles.get("OfxParamPropDefault") {
-                        *x_ptr = vals[0];
-                        *y_ptr = vals[1];
-                        return 0;
-                    }
+                if x_ptr.is_null() {
                     error!("Error");
                     return 1;
                 }
+
+                *x_ptr = x.unwrap_or_else(|| or_default_int(0));
+                return 0;
             }
-            "OfxParamTypeRGBA" => {
-                unsafe {
-                    // Pull four separate pointers off the variadic stack frame
-                    let r_ptr = args.next_arg::<*mut f64>();
-                    let g_ptr = args.next_arg::<*mut f64>();
-                    let b_ptr = args.next_arg::<*mut f64>();
-                    let a_ptr = args.next_arg::<*mut f64>();
-
-                    if r_ptr.is_null() || g_ptr.is_null() || b_ptr.is_null() || a_ptr.is_null() {
-                        error!("Error");
-                        return 1;
-                    }
-
-                    // Write to each individual scalar pointer target
-                    *r_ptr = 1.0;
-                    *g_ptr = 0.7;
-                    *b_ptr = 0.7;
-                    *a_ptr = 1.0;
-
-                    return 0;
-                }
-            }
-            a => error!("{a} Not implemented for now"),
         }
-    } else {
-        error!("Error");
-        return 1; // Error
+        ParameterValue::Integer2D(value) => {
+            unsafe {
+                // Pull two separate pointers off the variadic stack frame
+                let x_ptr = args.next_arg::<*mut i32>();
+                let y_ptr = args.next_arg::<*mut i32>();
+
+                if x_ptr.is_null() || y_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                let (x, y) = value.unwrap_or_else(|| (or_default_int(0), or_default_int(1)));
+                *x_ptr = x;
+                *y_ptr = y;
+                return 0;
+            }
+        }
+        ParameterValue::Integer3D(value) => {
+            unsafe {
+                // Pull two separate pointers off the variadic stack frame
+                let x_ptr = args.next_arg::<*mut i32>();
+                let y_ptr = args.next_arg::<*mut i32>();
+                let z_ptr = args.next_arg::<*mut i32>();
+
+                if x_ptr.is_null() || y_ptr.is_null() || z_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                let (x, y, z) = value
+                    .unwrap_or_else(|| (or_default_int(0), or_default_int(1), or_default_int(2)));
+                *x_ptr = x;
+                *y_ptr = y;
+                *z_ptr = z;
+                return 0;
+            }
+        }
+        ParameterValue::Double(x) => {
+            unsafe {
+                // Pull two separate pointers off the variadic stack frame
+                let x_ptr = args.next_arg::<*mut f64>();
+
+                if x_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                *x_ptr = x.unwrap_or_else(|| or_default_double(0));
+                return 0;
+            }
+        }
+        ParameterValue::Double2D(value) => {
+            unsafe {
+                // Pull two separate pointers off the variadic stack frame
+                let x_ptr = args.next_arg::<*mut f64>();
+                let y_ptr = args.next_arg::<*mut f64>();
+
+                if x_ptr.is_null() || y_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                let (x, y) = value.unwrap_or_else(|| (or_default_double(0), or_default_double(1)));
+                *x_ptr = x;
+                *y_ptr = y;
+                return 0;
+            }
+        }
+        ParameterValue::Double3D(value) => {
+            unsafe {
+                // Pull two separate pointers off the variadic stack frame
+                let x_ptr = args.next_arg::<*mut f64>();
+                let y_ptr = args.next_arg::<*mut f64>();
+                let z_ptr = args.next_arg::<*mut f64>();
+
+                if x_ptr.is_null() || y_ptr.is_null() || z_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                let (x, y, z) = value.unwrap_or_else(|| {
+                    (
+                        or_default_double(0),
+                        or_default_double(1),
+                        or_default_double(2),
+                    )
+                });
+                *x_ptr = x;
+                *y_ptr = y;
+                *z_ptr = z;
+                return 0;
+            }
+        }
+        ParameterValue::RGB(value) => {
+            unsafe {
+                // Pull four separate pointers off the variadic stack frame
+                let r_ptr = args.next_arg::<*mut f64>();
+                let g_ptr = args.next_arg::<*mut f64>();
+                let b_ptr = args.next_arg::<*mut f64>();
+
+                if r_ptr.is_null() || g_ptr.is_null() || b_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                // Write to each individual scalar pointer target
+                let (r, g, b) = value.unwrap_or_else(|| {
+                    (
+                        or_default_double(0),
+                        or_default_double(1),
+                        or_default_double(2),
+                    )
+                });
+                *r_ptr = r;
+                *g_ptr = g;
+                *b_ptr = b;
+
+                return 0;
+            }
+        }
+        ParameterValue::RGBA(value) => {
+            unsafe {
+                // Pull four separate pointers off the variadic stack frame
+                let r_ptr = args.next_arg::<*mut f64>();
+                let g_ptr = args.next_arg::<*mut f64>();
+                let b_ptr = args.next_arg::<*mut f64>();
+                let a_ptr = args.next_arg::<*mut f64>();
+
+                if r_ptr.is_null() || g_ptr.is_null() || b_ptr.is_null() || a_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                // Write to each individual scalar pointer target
+                let (r, g, b, a) = value.unwrap_or_else(|| {
+                    (
+                        or_default_double(0),
+                        or_default_double(1),
+                        or_default_double(2),
+                        or_default_double(3),
+                    )
+                });
+                *r_ptr = r;
+                *g_ptr = g;
+                *b_ptr = b;
+                *a_ptr = a;
+
+                return 0;
+            }
+        }
+        ParameterValue::None => error!("Uhhh... uninmplemented?"),
     }
 
-    0
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]

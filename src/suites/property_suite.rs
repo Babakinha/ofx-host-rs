@@ -1,7 +1,8 @@
 use crate::{
-    bindings::root::{OfxPropertySetHandle, OfxPropertySuiteV1, OfxStatus, kOfxStatOK},
-    instance::OfxHandle,
+    bindings::root::{OfxPropertySetHandle, OfxPropertySuiteV1, OfxStatus},
+    instance::{self},
     log_utils::c_str_to_str,
+    ofx_constants::{kOfxStatErrBadHandle, kOfxStatFailed, kOfxStatOK},
 };
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use tracing::error;
@@ -18,24 +19,22 @@ unsafe extern "C" fn prop_set_pointer(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() || index < 0 {
         error!("Error {:?} {:?} {:?}", property, properties, index);
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1;
-        } // kOfxStatFailed
+            return kOfxStatFailed;
+        }
     };
 
     let idx = index as usize;
     let entry = instance
-        .get_propeties_mut()
         .pointers
         .entry(prop_key.clone())
         .or_insert_with(Vec::new);
@@ -47,7 +46,7 @@ unsafe extern "C" fn prop_set_pointer(
     }
     entry[idx] = value;
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(property), value = c_str_to_str(value)))]
@@ -59,18 +58,17 @@ unsafe extern "C" fn prop_set_string(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() || index < 0 {
         error!("Error");
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1;
+            return kOfxStatFailed;
         }
     };
 
@@ -79,13 +77,12 @@ unsafe extern "C" fn prop_set_string(
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1;
+            return kOfxStatFailed;
         }
     };
 
     let idx = index as usize;
     let entry = instance
-        .get_propeties_mut()
         .strings
         .entry(prop_key.clone())
         .or_insert_with(Vec::new);
@@ -97,7 +94,7 @@ unsafe extern "C" fn prop_set_string(
     }
     entry[idx] = prop_value;
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(property)))]
@@ -109,27 +106,22 @@ unsafe extern "C" fn prop_set_double(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() || index < 0 {
         error!("Error");
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     };
 
     let idx = index as usize;
-    let entry = instance
-        .get_propeties_mut()
-        .doubles
-        .entry(prop_key)
-        .or_insert_with(Vec::new);
+    let entry = instance.doubles.entry(prop_key).or_insert_with(Vec::new);
 
     // Ensure the vector is large enough to accommodate the incoming index
     if idx + 1 > entry.len() {
@@ -138,10 +130,10 @@ unsafe extern "C" fn prop_set_double(
     }
     entry[idx] = value;
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
-#[instrument(level = "trace", ret(level = "trace"))]
+#[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(property)))]
 unsafe extern "C" fn prop_set_int(
     properties: OfxPropertySetHandle,
     property: *const c_char,
@@ -150,27 +142,22 @@ unsafe extern "C" fn prop_set_int(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() || index < 0 {
         error!("Error");
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     };
 
     let idx = index as usize;
-    let entry = instance
-        .get_propeties_mut()
-        .ints
-        .entry(prop_key)
-        .or_insert_with(Vec::new);
+    let entry = instance.ints.entry(prop_key).or_insert_with(Vec::new);
 
     // Ensure the vector is large enough to accommodate the incoming index
     if idx + 1 > entry.len() {
@@ -179,7 +166,7 @@ unsafe extern "C" fn prop_set_int(
     }
     entry[idx] = value;
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(_property)))]
@@ -213,26 +200,21 @@ unsafe extern "C" fn prop_set_double_n(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() || count < 0 {
         error!("Error");
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     };
 
-    let entry = instance
-        .get_propeties_mut()
-        .doubles
-        .entry(prop_key)
-        .or_insert_with(Vec::new);
+    let entry = instance.doubles.entry(prop_key).or_insert_with(Vec::new);
 
     let incoming_values = unsafe { std::slice::from_raw_parts(value, count as usize) };
 
@@ -244,7 +226,7 @@ unsafe extern "C" fn prop_set_double_n(
 
     entry[..incoming_values.len()].copy_from_slice(incoming_values);
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(_property)))]
@@ -267,24 +249,22 @@ unsafe extern "C" fn prop_get_pointer(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() || index < 0 {
         error!("Error");
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     };
 
     let idx = index as usize;
     let entry = instance
-        .get_propeties_mut()
         .pointers
         .entry(prop_key.clone())
         .or_insert_with(Vec::new);
@@ -296,11 +276,11 @@ unsafe extern "C" fn prop_get_pointer(
         },
         None => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     }
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(property)))]
@@ -312,24 +292,22 @@ unsafe extern "C" fn prop_get_string(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() || index < 0 {
         error!("Error");
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     };
 
     let idx = index as usize;
     let entry = instance
-        .get_propeties_mut()
         .strings
         .entry(prop_key.clone())
         .or_insert_with(Vec::new);
@@ -342,11 +320,11 @@ unsafe extern "C" fn prop_get_string(
         },
         None => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     }
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(property)))]
@@ -358,24 +336,22 @@ unsafe extern "C" fn prop_get_double(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() || index < 0 {
         error!("Error");
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     };
 
     let idx = index as usize;
     let entry = instance
-        .get_propeties_mut()
         .doubles
         .entry(prop_key.clone())
         .or_insert_with(Vec::new);
@@ -387,11 +363,11 @@ unsafe extern "C" fn prop_get_double(
         },
         None => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     }
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(property)))]
@@ -403,24 +379,22 @@ unsafe extern "C" fn prop_get_int(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() || index < 0 {
         error!("Error");
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     };
 
     let idx = index as usize;
     let entry = instance
-        .get_propeties_mut()
         .ints
         .entry(prop_key.clone())
         .or_insert_with(Vec::new);
@@ -432,11 +406,11 @@ unsafe extern "C" fn prop_get_int(
         },
         None => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     }
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(_property)))]
@@ -470,23 +444,21 @@ unsafe extern "C" fn prop_get_double_n(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() {
         error!("Error");
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     };
 
     let entry = instance
-        .get_propeties_mut()
         .doubles
         .entry(prop_key.clone())
         .or_insert_with(Vec::new);
@@ -499,7 +471,7 @@ unsafe extern "C" fn prop_get_double_n(
     let outgoing_array = unsafe { std::slice::from_raw_parts_mut(value, count as usize) };
     outgoing_array.copy_from_slice(&entry[..count as usize]);
 
-    kOfxStatOK as i32
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(property)))]
@@ -511,23 +483,21 @@ unsafe extern "C" fn prop_get_int_n(
 ) -> OfxStatus {
     if properties.is_null() || property.is_null() {
         error!("Error");
-        return 4; // kOfxStatErrBadHandle / kOfxStatErrBadIndex
+        return kOfxStatErrBadHandle;
     }
 
-    let instance_ptr = properties as *mut OfxHandle;
-    let instance = unsafe { &mut *instance_ptr };
+    let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(properties).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(property) };
     let prop_key = match c_str.to_str() {
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1; // kOfxStatFailed
+            return kOfxStatFailed;
         }
     };
 
     let entry = instance
-        .get_propeties_mut()
         .ints
         .entry(prop_key.clone())
         .or_insert_with(Vec::new);

@@ -1,5 +1,6 @@
 use crate::bindings::root;
 use crate::bindings::root::{OfxInteractHandle, OfxPropertySetHandle, OfxStatus};
+use crate::ofx_constants::{kOfxStatErrUnsupported, kOfxStatFailed};
 
 use tracing::error;
 use tracing::instrument;
@@ -11,13 +12,13 @@ use tracing::instrument;
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn interact_swap_buffers(_interact_instance: OfxInteractHandle) -> OfxStatus {
     error!("OfxInteractSuiteV1::interactSwapBuffers called");
-    2 // kOfxStatErrUnsupported
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn interact_redraw(_interact_instance: OfxInteractHandle) -> OfxStatus {
     error!("OfxInteractSuiteV1::interactRedraw called");
-    2 // kOfxStatErrUnsupported
+    kOfxStatErrUnsupported
 }
 
 // ==========================================
@@ -31,12 +32,12 @@ unsafe extern "C" fn interact_get_property_set(
 ) -> OfxStatus {
     error!("OfxInteractSuiteV1::interactGetPropertySet called");
     if property.is_null() {
-        return 1; // kOfxStatFailed
+        return kOfxStatFailed;
     }
 
     // Once you fully implement Interacts, you will attach an OfxPropertySetHandle
     // to your interact backing instance here.
-    2 // kOfxStatErrUnsupported
+    kOfxStatErrUnsupported
 }
 
 // ==========================================
