@@ -1,4 +1,4 @@
-use crate::bindings::root::{self, OfxParamSetStruct};
+use crate::bindings::root::{self};
 use crate::bindings::root::{
     OfxImageClipHandle, OfxImageEffectHandle, OfxImageMemoryHandle, OfxParamSetHandle,
     OfxPropertySetHandle, OfxRectD, OfxStatus, OfxTime,
@@ -9,7 +9,7 @@ use crate::ofx_constants::{kOfxStatErrBadHandle, kOfxStatErrMemory, kOfxStatFail
 use std::alloc::{Layout, alloc, dealloc};
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
-use tracing::{error, instrument, warn};
+use tracing::{error, instrument, trace, warn};
 
 const IMAGE_ALIGNMENT: usize = 16;
 
@@ -37,6 +37,7 @@ unsafe extern "C" fn get_property_set(
 
     unsafe {
         *prop_handle = instance.get_properties_mut().as_raw_ofx_handle();
+        trace!("{:#?}", *prop_handle)
     }
 
     kOfxStatOK
@@ -51,10 +52,11 @@ unsafe extern "C" fn get_param_set(
         error!("getParameterSet received a NULL handle");
         return kOfxStatErrBadHandle;
     }
+    let instance = unsafe { BabafxInstance::ref_mut_from_ofx_handle(image_effect).unwrap() };
 
-    // TODO: uhm... idk if this is right...
     unsafe {
-        *param_set = image_effect as *mut OfxParamSetStruct;
+        *param_set = instance.parameters.as_raw_ofx_handle();
+        trace!("{:#?}", *param_set)
     }
 
     kOfxStatOK
@@ -144,6 +146,12 @@ unsafe extern "C" fn clip_define(
                     vec!["OfxFieldNone".to_string()],
                 );
 
+                // Rendereiosmf Scale
+                set.doubles.insert(
+                    String::from("OfxImageEffectPropRenderScale"),
+                    vec![1.0, 1.0],
+                );
+
                 // 5. Unique Frame Identifier (Cache key)
                 set.strings.insert(
                     "OfxImagePropUniqueIdentifier".to_string(),
@@ -163,6 +171,8 @@ unsafe extern "C" fn clip_define(
                 .unwrap()
                 .get_properties_mut()
                 .as_raw_ofx_handle();
+
+            trace!("{:#?}", *property_set)
         }
     }
 
@@ -191,12 +201,14 @@ unsafe extern "C" fn clip_get_handle(
         if !clip.is_null() {
             unsafe {
                 *clip = clip_instance.as_raw_ofx_handle();
+                trace!("{:#?}", *clip)
             }
         }
 
         if !property_set.is_null() {
             unsafe {
                 *property_set = clip_instance.get_properties_mut().as_raw_ofx_handle();
+                trace!("{:#?}", *property_set)
             }
         }
     } else {
@@ -220,6 +232,7 @@ unsafe extern "C" fn clip_get_property_set(
 
     unsafe {
         *prop_handle = instance.get_properties_mut().as_raw_ofx_handle();
+        trace!("{:#?}", *prop_handle)
     }
 
     kOfxStatOK
@@ -237,6 +250,7 @@ unsafe extern "C" fn clip_get_image(
 
     unsafe {
         *image_handle = instance.get_properties_mut().as_raw_ofx_handle();
+        trace!("{:#?}", *image_handle)
     }
 
     kOfxStatOK
@@ -286,7 +300,6 @@ unsafe extern "C" fn clip_get_region_of_definition(
     let instance = unsafe { ImageClip::ref_mut_from_ofx_handle(clip).unwrap() };
 
     if let Some(int_bounds) = instance.properties.ints.get("OfxImagePropBounds") {
-        // int_bounds is typically [x1, y1, x2, y2] -> [0, 0, 720, 480]
         unsafe {
             (*bounds).x1 = int_bounds[0] as f64;
             (*bounds).y1 = int_bounds[1] as f64;

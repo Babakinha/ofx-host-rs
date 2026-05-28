@@ -139,9 +139,10 @@ fn main() {
 
         // Instantiate our Host struct
         let mut host_properties = instance::PropertySet::new();
-        host_properties
-            .doubles
-            .insert("Mreow".to_string(), vec![1.0]);
+        host_properties.ints.insert(
+            String::from("OfxImageEffectPropMultipleClipDepths"),
+            vec![0],
+        );
         let host_properties_handle = host_properties.to_raw_ofx_handle();
 
         let host_definition = Box::new(bindings::root::OfxHost {
@@ -231,7 +232,6 @@ fn main() {
                     instance_handle,
                     std::ptr::null_mut(), // TODO: point to real data
                     output_handle,
-                    // std::ptr::null_mut(), // TODO: point to real data
                 );
                 let _output = PropertySet::from_ofx_handle(output_handle);
                 debug!("status = {}, output = {:#?}", status, _output);
@@ -255,14 +255,7 @@ fn main() {
 
                 trace!("Image Effect Action Get Region Of Interest");
                 let mut input = instance::PropertySet::new();
-                input.doubles.insert(
-                    String::from("OfxImageEffectPropRegionOfInterest"),
-                    vec![0.0, 0.0, 0.8, 0.8],
-                );
-                input.doubles.insert(
-                    String::from("OfxImageClipPropRoI_Source"),
-                    vec![0.0, 0.0, 0.8, 0.8],
-                );
+                input.doubles.insert(String::from("OfxPropTime"), vec![1.0]);
                 let input_handle = input.to_raw_ofx_handle();
                 let output = instance::PropertySet::new();
                 let output_handle = output.to_raw_ofx_handle();
@@ -274,7 +267,6 @@ fn main() {
                 );
                 let _input = PropertySet::from_ofx_handle(input_handle);
                 let _output = PropertySet::from_ofx_handle(output_handle);
-
                 debug!("status = {}, output = {:#?}", status, _output);
 
                 trace!("Image Effect Action Render");
@@ -282,7 +274,7 @@ fn main() {
                 input.doubles.insert(String::from("OfxPropTime"), vec![1.0]);
                 input.doubles.insert(
                     String::from("OfxImageEffectPropRenderScale"),
-                    vec![720.0, 480.0],
+                    vec![1.0, 1.0],
                 );
                 input.ints.insert(
                     String::from("OfxImageEffectPropRenderWindow"),
@@ -299,7 +291,6 @@ fn main() {
                 );
                 let _input = PropertySet::from_ofx_handle(input_handle);
                 let _output = PropertySet::from_ofx_handle(output_handle);
-
                 debug!("status = {}, output = {:#?}", status, _output);
 
                 // Save?

@@ -3,7 +3,7 @@ use crate::bindings::root::{self};
 use crate::ofx_constants::{kOfxStatErrBadHandle, kOfxStatErrMemory, kOfxStatFailed, kOfxStatOK};
 use std::alloc::{Layout, alloc, dealloc};
 use std::os::raw::c_void;
-use tracing::{error, instrument};
+use tracing::{error, instrument, warn};
 
 const ALIGNMENT: usize = 16;
 
@@ -17,6 +17,7 @@ unsafe extern "C" fn memory_alloc(
     n_bytes: usize,
     allocated_data: *mut *mut c_void,
 ) -> OfxStatus {
+    warn!("memory_alloc half implemented!");
     if allocated_data.is_null() || n_bytes == 0 {
         return kOfxStatFailed;
     }
@@ -53,6 +54,7 @@ unsafe extern "C" fn memory_alloc(
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn memory_free(allocated_data: *mut c_void) -> OfxStatus {
+    warn!("memory_free half implemented!");
     if allocated_data.is_null() {
         return kOfxStatOK;
     }

@@ -1,14 +1,14 @@
-use crate::bindings::root::{self, OfxImageEffectHandle};
+use crate::bindings::root::{self, OfxBytes};
 use crate::bindings::root::{
     OfxParamHandle, OfxParamSetHandle, OfxPropertySetHandle, OfxRangeD, OfxStatus, OfxTime,
 };
-use crate::instance::{self, AsPropertySet, BabafxInstance, ParameterValue, PropertySet};
+use crate::instance::{self, AsPropertySet, ParameterSet, ParameterValue, PropertySet};
 use crate::log_utils::c_str_to_str;
 use crate::ofx_constants::{kOfxStatErrBadHandle, kOfxStatOK};
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_uint};
 use tracing::error;
-use tracing::{instrument, warn};
+use tracing::{instrument, trace, warn};
 
 // ==========================================
 // 1. DEFINITION & HANDLE FETCHING
@@ -21,9 +21,7 @@ unsafe extern "C" fn param_define(
     name: *const c_char,
     property_set: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    let instance = unsafe {
-        BabafxInstance::ref_mut_from_ofx_handle(param_set as OfxImageEffectHandle).unwrap()
-    };
+    let instance = unsafe { ParameterSet::ref_mut_from_ofx_handle(param_set).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(param_type) };
     let param_type_str = match c_str.to_str() {
@@ -48,6 +46,7 @@ unsafe extern "C" fn param_define(
         crate::instance::ParameterThing {
             name: name_str.clone(),
             value: match param_type_str.as_str() {
+                "OfxParamTypeBoolean" => instance::ParameterValue::Boolean(None),
                 "OfxParamTypeInteger" => instance::ParameterValue::Integer(None),
                 "OfxParamTypeInteger2D" => instance::ParameterValue::Integer2D(None),
                 "OfxParamTypeInteger3D" => instance::ParameterValue::Integer3D(None),
@@ -56,14 +55,27 @@ unsafe extern "C" fn param_define(
                 "OfxParamTypeDouble3D" => instance::ParameterValue::Double3D(None),
                 "OfxParamTypeRGB" => instance::ParameterValue::RGB(None),
                 "OfxParamTypeRGBA" => instance::ParameterValue::RGBA(None),
-                _ => instance::ParameterValue::None,
+                "OfxParamTypeBytes" => instance::ParameterValue::Bytes(None),
+                "OfxParamTypePage" => instance::ParameterValue::Page(None),
+                "OfxParamTypeGroup" => instance::ParameterValue::Group(None),
+                "OfxParamTypeChoice" => instance::ParameterValue::Choice(None),
+                "OfxParamTypeStrChoice" => instance::ParameterValue::StrChoice(None),
+                "OfxParamTypePushButton" => instance::ParameterValue::PushButton(None),
+                "OfxParamTypeCustom" => instance::ParameterValue::Custom(None),
+
+                param_type => {
+                    error!("{param_type} not implemented yet!");
+                    instance::ParameterValue::None
+                }
             },
-            properties: PropertySet::new(),
+            properties: Box::new(PropertySet::new()),
         },
     );
 
     if !property_set.is_null() {
         unsafe {
+            //TODO: Thecnically works since i put the Box<> but... its not using Box::into_raw or
+            //smthn soooo... ehhh
             *property_set = instance
                 .parameters
                 .get_mut(&name_str)
@@ -83,9 +95,7 @@ unsafe extern "C" fn param_get_handle(
     param: *mut OfxParamHandle,
     property_set: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    let instance = unsafe {
-        BabafxInstance::ref_mut_from_ofx_handle(param_set as OfxImageEffectHandle).unwrap()
-    };
+    let instance = unsafe { ParameterSet::ref_mut_from_ofx_handle(param_set).unwrap() };
 
     let c_str = unsafe { CStr::from_ptr(name) };
     let name_str = match c_str.to_str() {
@@ -100,12 +110,14 @@ unsafe extern "C" fn param_get_handle(
         if !param.is_null() {
             unsafe {
                 *param = parameter.as_raw_ofx_handle();
+                trace!("{:#?}", *param)
             }
         }
 
         if !property_set.is_null() {
             unsafe {
                 *property_set = parameter.get_properties_mut().as_raw_ofx_handle();
+                trace!("{:#?}", *property_set)
             }
         }
     } else {
@@ -125,12 +137,11 @@ unsafe extern "C" fn param_set_get_property_set(
         error!("getPropertySet received a NULL handle");
         return kOfxStatErrBadHandle;
     }
-    let instance = unsafe {
-        BabafxInstance::ref_mut_from_ofx_handle(param_set as OfxImageEffectHandle).unwrap()
-    };
+    let instance = unsafe { ParameterSet::ref_mut_from_ofx_handle(param_set).unwrap() };
 
     unsafe {
         *prop_handle = instance.get_properties_mut().as_raw_ofx_handle();
+        trace!("*prop_handle: {:#?}", *prop_handle);
     }
 
     kOfxStatOK
@@ -185,7 +196,31 @@ unsafe extern "C" fn param_get_value_at_time(
             .get(index)
             .unwrap_or(&0.0))
     };
-    match instance.value {
+    let or_default_string = |index: usize| {
+        instance
+            .properties
+            .strings
+            .get("OfxParamPropDefault")
+            .unwrap_or(&vec![])
+            .get(index)
+            .unwrap_or(&String::new())
+            .clone()
+    };
+    match &instance.value {
+        ParameterValue::Boolean(value) => {
+            unsafe {
+                // Pull two separate pointers off the variadic stack frame
+                let x_ptr = args.next_arg::<*mut bool>();
+
+                if x_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                *x_ptr = value.unwrap_or_else(|| or_default_int(0) == 1);
+                return 0;
+            }
+        }
         ParameterValue::Integer(x) => {
             unsafe {
                 // Pull two separate pointers off the variadic stack frame
@@ -262,7 +297,37 @@ unsafe extern "C" fn param_get_value_at_time(
                     return 1;
                 }
 
-                let (x, y) = value.unwrap_or_else(|| (or_default_double(0), or_default_double(1)));
+                let (mut x, mut y) =
+                    value.unwrap_or_else(|| (or_default_double(0), or_default_double(1)));
+
+                // Damn u normalization whaterver bwa
+                let double_type = instance
+                    .properties
+                    .strings
+                    .get("OfxParamPropDoubleType")
+                    .and_then(|v| v.first())
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+
+                let default_coord_system = instance
+                    .properties
+                    .strings
+                    .get("OfxParamPropDefaultCoordinateSystem")
+                    .and_then(|v| v.first())
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+
+                if double_type == "OfxParamDoubleTypeXYAbsolute"
+                    && default_coord_system == "OfxParamCoordinatesNormalised"
+                {
+                    // TODO: Grab projects or clip resolution
+                    let project_w = 720 as f64;
+                    let project_h = 480 as f64;
+
+                    x *= project_w;
+                    y *= project_h;
+                }
+
                 *x_ptr = x;
                 *y_ptr = y;
                 return 0;
@@ -350,7 +415,62 @@ unsafe extern "C" fn param_get_value_at_time(
                 return 0;
             }
         }
+
+        ParameterValue::String(value) => {
+            unsafe {
+                // Pull two separate pointers off the variadic stack frame
+                let x_ptr = args.next_arg::<*mut *mut c_char>();
+
+                if x_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                let str = match value.as_ref() {
+                    Some(string) => string.clone(),
+                    None => or_default_string(0)
+                };
+                let c_str = CString::new(str).unwrap();
+
+                *x_ptr = c_str.into_raw();
+                return 0;
+            }
+        }
+
+        ParameterValue::Bytes(value) => {
+            unsafe {
+                // Pull two separate pointers off the variadic stack frame
+                let x_ptr = args.next_arg::<*mut OfxBytes>();
+
+                if x_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                // TODO: Default?
+                let slice = value.as_ref().unwrap();
+                *x_ptr = OfxBytes { data: slice.as_ptr(), length: slice.len() };
+
+                return 0;
+            }
+        }
+
+        ParameterValue::Choice(x) => {
+            unsafe {
+                // Pull two separate pointers off the variadic stack frame
+                let x_ptr = args.next_arg::<*mut i32>();
+
+                if x_ptr.is_null() {
+                    error!("Error");
+                    return 1;
+                }
+
+                *x_ptr = x.unwrap_or_else(|| or_default_int(0));
+                return 0;
+            }
+        }
         ParameterValue::None => error!("Uhhh... uninmplemented?"),
+        value => error!("{value:?} Uhhh... uninmplemented?"),
     }
 
     kOfxStatOK
