@@ -7,9 +7,19 @@ use tracing::{error, instrument, warn};
 
 const ALIGNMENT: usize = 16;
 
-// ==========================================
-// 1. MEMORY MANAGEMENT IMPLEMENTATION
-// ==========================================
+#[repr(C)]
+struct MemoryHeader {
+    total_size: usize,
+}
+
+const HEADER_PADDING: usize = {
+    let header_size = std::mem::size_of::<MemoryHeader>();
+    if header_size % ALIGNMENT == 0 {
+        header_size
+    } else {
+        ((header_size / ALIGNMENT) + 1) * ALIGNMENT
+    }
+};
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn memory_alloc(
@@ -17,68 +27,57 @@ unsafe extern "C" fn memory_alloc(
     n_bytes: usize,
     allocated_data: *mut *mut c_void,
 ) -> OfxStatus {
-    warn!("memory_alloc half implemented!");
+    warn!("memory_alloc half implemented");
     if allocated_data.is_null() || n_bytes == 0 {
+        error!("Error!");
         return kOfxStatFailed;
     }
 
-    // We allocate extra space at the front to store the total allocation size
-    // so we can reconstruct the exact Layout when memory_free is called.
-    let padding = ALIGNMENT;
-    let total_size = n_bytes + padding;
-
+    let total_size = HEADER_PADDING + n_bytes;
     match Layout::from_size_align(total_size, ALIGNMENT) {
         Ok(layout) => {
             unsafe {
                 let raw_ptr = alloc(layout);
                 if raw_ptr.is_null() {
-                    error!(
-                        "OfxMemorySuiteV1: Out of memory trying to allocate {} bytes",
-                        n_bytes
-                    );
+                    error!("Out of memory trying to allocate {} bytes", n_bytes);
                     return kOfxStatErrMemory;
                 }
 
-                // Write the total size metadata into the hidden prefix area
-                *(raw_ptr as *mut usize) = total_size;
+                let header_ptr = raw_ptr as *mut MemoryHeader;
+                *header_ptr = MemoryHeader { total_size };
 
-                // Offset the pointer passed back to the C plugin past our metadata
-                let client_ptr = raw_ptr.add(padding);
+                let client_ptr = raw_ptr.add(HEADER_PADDING);
                 *allocated_data = client_ptr as *mut c_void;
             }
             kOfxStatOK
         }
-        Err(_) => kOfxStatFailed,
+        Err(_) => {
+            error!("Couldn't allocate layout.");
+            kOfxStatFailed
+        }
     }
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn memory_free(allocated_data: *mut c_void) -> OfxStatus {
-    warn!("memory_free half implemented!");
     if allocated_data.is_null() {
+        error!("Error!");
         return kOfxStatOK;
     }
 
     unsafe {
-        // Move backward to reveal the hidden metadata address block
-        let padding = ALIGNMENT;
-        let raw_ptr = (allocated_data as *mut u8).sub(padding);
-
-        // Read the total allocation size we stored during memory_alloc
-        let total_size = *(raw_ptr as *mut usize);
+        let raw_ptr = (allocated_data as *mut u8).sub(HEADER_PADDING);
+        let total_size = (*(raw_ptr as *mut MemoryHeader)).total_size;
 
         if let Ok(layout) = Layout::from_size_align(total_size, ALIGNMENT) {
             dealloc(raw_ptr, layout);
             return kOfxStatOK;
         } else {
+            error!("Couldn't allocate layout.");
             return kOfxStatErrBadHandle;
         }
     }
 }
-
-// ==========================================
-// SUITE BUILDER
-// ==========================================
 
 #[instrument(level = "trace", ret(level = "trace"))]
 pub fn memory_suite() -> root::OfxMemorySuiteV1 {

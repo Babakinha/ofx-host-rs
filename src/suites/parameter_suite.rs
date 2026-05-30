@@ -2,17 +2,17 @@ use crate::bindings::root::{self, OfxBytes};
 use crate::bindings::root::{
     OfxParamHandle, OfxParamSetHandle, OfxPropertySetHandle, OfxRangeD, OfxStatus, OfxTime,
 };
-use crate::instance::{self, AsPropertySet, ParameterSet, ParameterValue, PropertySet};
+use crate::instance::{
+    self, AsPropertySet, ParameterSet, ParameterThing, ParameterValue, PropertySet,
+};
 use crate::log_utils::c_str_to_str;
-use crate::ofx_constants::{kOfxStatErrBadHandle, kOfxStatOK};
+use crate::ofx_constants::{
+    kOfxStatErrBadHandle, kOfxStatErrUnsupported, kOfxStatFailed, kOfxStatOK,
+};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_uint};
 use tracing::error;
 use tracing::{instrument, trace, warn};
-
-// ==========================================
-// 1. DEFINITION & HANDLE FETCHING
-// ==========================================
 
 #[instrument(level = "trace", ret(level = "trace"), fields(name = c_str_to_str(name), param_type = c_str_to_str(param_type)))]
 unsafe extern "C" fn param_define(
@@ -28,7 +28,7 @@ unsafe extern "C" fn param_define(
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1;
+            return kOfxStatFailed;
         }
     };
 
@@ -37,7 +37,7 @@ unsafe extern "C" fn param_define(
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1;
+            return kOfxStatFailed;
         }
     };
 
@@ -85,7 +85,7 @@ unsafe extern "C" fn param_define(
         }
     }
 
-    return 0;
+    return kOfxStatOK;
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(name = c_str_to_str(name)))]
@@ -102,7 +102,7 @@ unsafe extern "C" fn param_get_handle(
         Ok(s) => s.to_string(),
         Err(_) => {
             error!("Error");
-            return 1;
+            return kOfxStatFailed;
         }
     };
 
@@ -121,8 +121,8 @@ unsafe extern "C" fn param_get_handle(
             }
         }
     } else {
-        error!("Error");
-        return 1;
+        error!("Error!");
+        return kOfxStatFailed;
     }
 
     kOfxStatOK
@@ -134,7 +134,7 @@ unsafe extern "C" fn param_set_get_property_set(
     prop_handle: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
     if param_set.is_null() || prop_handle.is_null() {
-        error!("getPropertySet received a NULL handle");
+        error!("Error!");
         return kOfxStatErrBadHandle;
     }
     let instance = unsafe { ParameterSet::ref_mut_from_ofx_handle(param_set).unwrap() };
@@ -149,21 +149,22 @@ unsafe extern "C" fn param_set_get_property_set(
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn param_get_property_set(
-    _param: OfxParamHandle,
-    _prop_handle: *mut OfxPropertySetHandle,
+    param: OfxParamHandle,
+    prop_handle: *mut OfxPropertySetHandle,
 ) -> OfxStatus {
-    error!("paramGetPropertySet not implemented");
-    2
-}
+    let instance = unsafe { ParameterThing::ref_mut_from_ofx_handle(param).unwrap() };
+    unsafe {
+        *prop_handle = instance.get_properties_mut().as_raw_ofx_handle();
+        trace!("*prop_handle: {:#?}", *prop_handle);
+    }
 
-// ==========================================
-// 2. VALUE GETTERS & EVALUATION
-// ==========================================
+    kOfxStatOK
+}
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn param_get_value(_param_handle: OfxParamHandle, _: ...) -> OfxStatus {
-    error!("paramGetValue not implemented");
-    2
+    error!("param_get_value not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -207,270 +208,226 @@ unsafe extern "C" fn param_get_value_at_time(
             .clone()
     };
     match &instance.value {
-        ParameterValue::Boolean(value) => {
-            unsafe {
-                // Pull two separate pointers off the variadic stack frame
-                let x_ptr = args.next_arg::<*mut bool>();
+        ParameterValue::Boolean(value) => unsafe {
+            let x_ptr = args.next_arg::<*mut bool>();
 
-                if x_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
-
-                *x_ptr = value.unwrap_or_else(|| or_default_int(0) == 1);
-                return 0;
+            if x_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
-        }
-        ParameterValue::Integer(x) => {
-            unsafe {
-                // Pull two separate pointers off the variadic stack frame
-                let x_ptr = args.next_arg::<*mut i32>();
 
-                if x_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
+            *x_ptr = value.unwrap_or_else(|| or_default_int(0) == 1);
+        },
+        ParameterValue::Integer(x) => unsafe {
+            let x_ptr = args.next_arg::<*mut i32>();
 
-                *x_ptr = x.unwrap_or_else(|| or_default_int(0));
-                return 0;
+            if x_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
-        }
-        ParameterValue::Integer2D(value) => {
-            unsafe {
-                // Pull two separate pointers off the variadic stack frame
-                let x_ptr = args.next_arg::<*mut i32>();
-                let y_ptr = args.next_arg::<*mut i32>();
 
-                if x_ptr.is_null() || y_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
+            *x_ptr = x.unwrap_or_else(|| or_default_int(0));
+        },
+        ParameterValue::Integer2D(value) => unsafe {
+            let x_ptr = args.next_arg::<*mut i32>();
+            let y_ptr = args.next_arg::<*mut i32>();
 
-                let (x, y) = value.unwrap_or_else(|| (or_default_int(0), or_default_int(1)));
-                *x_ptr = x;
-                *y_ptr = y;
-                return 0;
+            if x_ptr.is_null() || y_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
-        }
-        ParameterValue::Integer3D(value) => {
-            unsafe {
-                // Pull two separate pointers off the variadic stack frame
-                let x_ptr = args.next_arg::<*mut i32>();
-                let y_ptr = args.next_arg::<*mut i32>();
-                let z_ptr = args.next_arg::<*mut i32>();
 
-                if x_ptr.is_null() || y_ptr.is_null() || z_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
+            let (x, y) = value.unwrap_or_else(|| (or_default_int(0), or_default_int(1)));
+            *x_ptr = x;
+            *y_ptr = y;
+        },
+        ParameterValue::Integer3D(value) => unsafe {
+            let x_ptr = args.next_arg::<*mut i32>();
+            let y_ptr = args.next_arg::<*mut i32>();
+            let z_ptr = args.next_arg::<*mut i32>();
 
-                let (x, y, z) = value
-                    .unwrap_or_else(|| (or_default_int(0), or_default_int(1), or_default_int(2)));
-                *x_ptr = x;
-                *y_ptr = y;
-                *z_ptr = z;
-                return 0;
+            if x_ptr.is_null() || y_ptr.is_null() || z_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
-        }
-        ParameterValue::Double(x) => {
-            unsafe {
-                // Pull two separate pointers off the variadic stack frame
-                let x_ptr = args.next_arg::<*mut f64>();
 
-                if x_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
+            let (x, y, z) =
+                value.unwrap_or_else(|| (or_default_int(0), or_default_int(1), or_default_int(2)));
+            *x_ptr = x;
+            *y_ptr = y;
+            *z_ptr = z;
+        },
+        ParameterValue::Double(x) => unsafe {
+            let x_ptr = args.next_arg::<*mut f64>();
 
-                *x_ptr = x.unwrap_or_else(|| or_default_double(0));
-                return 0;
+            if x_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
-        }
-        ParameterValue::Double2D(value) => {
-            unsafe {
-                // Pull two separate pointers off the variadic stack frame
-                let x_ptr = args.next_arg::<*mut f64>();
-                let y_ptr = args.next_arg::<*mut f64>();
 
-                if x_ptr.is_null() || y_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
+            *x_ptr = x.unwrap_or_else(|| or_default_double(0));
+        },
+        ParameterValue::Double2D(value) => unsafe {
+            let x_ptr = args.next_arg::<*mut f64>();
+            let y_ptr = args.next_arg::<*mut f64>();
 
-                let (mut x, mut y) =
-                    value.unwrap_or_else(|| (or_default_double(0), or_default_double(1)));
-
-                // Damn u normalization whaterver bwa
-                let double_type = instance
-                    .properties
-                    .strings
-                    .get("OfxParamPropDoubleType")
-                    .and_then(|v| v.first())
-                    .map(|s| s.as_str())
-                    .unwrap_or("");
-
-                let default_coord_system = instance
-                    .properties
-                    .strings
-                    .get("OfxParamPropDefaultCoordinateSystem")
-                    .and_then(|v| v.first())
-                    .map(|s| s.as_str())
-                    .unwrap_or("");
-
-                if double_type == "OfxParamDoubleTypeXYAbsolute"
-                    && default_coord_system == "OfxParamCoordinatesNormalised"
-                {
-                    // TODO: Grab projects or clip resolution
-                    let project_w = 720 as f64;
-                    let project_h = 480 as f64;
-
-                    x *= project_w;
-                    y *= project_h;
-                }
-
-                *x_ptr = x;
-                *y_ptr = y;
-                return 0;
+            if x_ptr.is_null() || y_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
-        }
-        ParameterValue::Double3D(value) => {
-            unsafe {
-                // Pull two separate pointers off the variadic stack frame
-                let x_ptr = args.next_arg::<*mut f64>();
-                let y_ptr = args.next_arg::<*mut f64>();
-                let z_ptr = args.next_arg::<*mut f64>();
 
-                if x_ptr.is_null() || y_ptr.is_null() || z_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
+            let (mut x, mut y) =
+                value.unwrap_or_else(|| (or_default_double(0), or_default_double(1)));
 
-                let (x, y, z) = value.unwrap_or_else(|| {
-                    (
-                        or_default_double(0),
-                        or_default_double(1),
-                        or_default_double(2),
-                    )
-                });
-                *x_ptr = x;
-                *y_ptr = y;
-                *z_ptr = z;
-                return 0;
+            let double_type = instance
+                .properties
+                .strings
+                .get("OfxParamPropDoubleType")
+                .and_then(|v| v.first())
+                .map(|s| s.as_str())
+                .unwrap_or("");
+
+            let default_coord_system = instance
+                .properties
+                .strings
+                .get("OfxParamPropDefaultCoordinateSystem")
+                .and_then(|v| v.first())
+                .map(|s| s.as_str())
+                .unwrap_or("");
+
+            if double_type == "OfxParamDoubleTypeXYAbsolute"
+                && default_coord_system == "OfxParamCoordinatesNormalised"
+            {
+                // TODO: Grab projects or clip resolution
+                let project_w = 720 as f64;
+                let project_h = 480 as f64;
+
+                x *= project_w;
+                y *= project_h;
             }
-        }
-        ParameterValue::RGB(value) => {
-            unsafe {
-                // Pull four separate pointers off the variadic stack frame
-                let r_ptr = args.next_arg::<*mut f64>();
-                let g_ptr = args.next_arg::<*mut f64>();
-                let b_ptr = args.next_arg::<*mut f64>();
 
-                if r_ptr.is_null() || g_ptr.is_null() || b_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
+            *x_ptr = x;
+            *y_ptr = y;
+        },
 
-                // Write to each individual scalar pointer target
-                let (r, g, b) = value.unwrap_or_else(|| {
-                    (
-                        or_default_double(0),
-                        or_default_double(1),
-                        or_default_double(2),
-                    )
-                });
-                *r_ptr = r;
-                *g_ptr = g;
-                *b_ptr = b;
+        ParameterValue::Double3D(value) => unsafe {
+            let x_ptr = args.next_arg::<*mut f64>();
+            let y_ptr = args.next_arg::<*mut f64>();
+            let z_ptr = args.next_arg::<*mut f64>();
 
-                return 0;
+            if x_ptr.is_null() || y_ptr.is_null() || z_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
-        }
-        ParameterValue::RGBA(value) => {
-            unsafe {
-                // Pull four separate pointers off the variadic stack frame
-                let r_ptr = args.next_arg::<*mut f64>();
-                let g_ptr = args.next_arg::<*mut f64>();
-                let b_ptr = args.next_arg::<*mut f64>();
-                let a_ptr = args.next_arg::<*mut f64>();
 
-                if r_ptr.is_null() || g_ptr.is_null() || b_ptr.is_null() || a_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
+            let (x, y, z) = value.unwrap_or_else(|| {
+                (
+                    or_default_double(0),
+                    or_default_double(1),
+                    or_default_double(2),
+                )
+            });
+            *x_ptr = x;
+            *y_ptr = y;
+            *z_ptr = z;
+        },
+        ParameterValue::RGB(value) => unsafe {
+            let r_ptr = args.next_arg::<*mut f64>();
+            let g_ptr = args.next_arg::<*mut f64>();
+            let b_ptr = args.next_arg::<*mut f64>();
 
-                // Write to each individual scalar pointer target
-                let (r, g, b, a) = value.unwrap_or_else(|| {
-                    (
-                        or_default_double(0),
-                        or_default_double(1),
-                        or_default_double(2),
-                        or_default_double(3),
-                    )
-                });
-                *r_ptr = r;
-                *g_ptr = g;
-                *b_ptr = b;
-                *a_ptr = a;
-
-                return 0;
+            if r_ptr.is_null() || g_ptr.is_null() || b_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
-        }
 
-        ParameterValue::String(value) => {
-            unsafe {
-                // Pull two separate pointers off the variadic stack frame
-                let x_ptr = args.next_arg::<*mut *mut c_char>();
+            let (r, g, b) = value.unwrap_or_else(|| {
+                (
+                    or_default_double(0),
+                    or_default_double(1),
+                    or_default_double(2),
+                )
+            });
+            *r_ptr = r;
+            *g_ptr = g;
+            *b_ptr = b;
+        },
+        ParameterValue::RGBA(value) => unsafe {
+            let r_ptr = args.next_arg::<*mut f64>();
+            let g_ptr = args.next_arg::<*mut f64>();
+            let b_ptr = args.next_arg::<*mut f64>();
+            let a_ptr = args.next_arg::<*mut f64>();
 
-                if x_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
-
-                let str = match value.as_ref() {
-                    Some(string) => string.clone(),
-                    None => or_default_string(0)
-                };
-                let c_str = CString::new(str).unwrap();
-
-                *x_ptr = c_str.into_raw();
-                return 0;
+            if r_ptr.is_null() || g_ptr.is_null() || b_ptr.is_null() || a_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
-        }
 
-        ParameterValue::Bytes(value) => {
-            unsafe {
-                // Pull two separate pointers off the variadic stack frame
-                let x_ptr = args.next_arg::<*mut OfxBytes>();
+            let (r, g, b, a) = value.unwrap_or_else(|| {
+                (
+                    or_default_double(0),
+                    or_default_double(1),
+                    or_default_double(2),
+                    or_default_double(3),
+                )
+            });
+            *r_ptr = r;
+            *g_ptr = g;
+            *b_ptr = b;
+            *a_ptr = a;
+        },
 
-                if x_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
+        ParameterValue::String(value) => unsafe {
+            let x_ptr = args.next_arg::<*mut *mut c_char>();
 
-                // TODO: Default?
-                let slice = value.as_ref().unwrap();
-                *x_ptr = OfxBytes { data: slice.as_ptr(), length: slice.len() };
-
-                return 0;
+            if x_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
-        }
 
-        ParameterValue::Choice(x) => {
-            unsafe {
-                // Pull two separate pointers off the variadic stack frame
-                let x_ptr = args.next_arg::<*mut i32>();
+            let str = match value.as_ref() {
+                Some(string) => string.clone(),
+                None => or_default_string(0),
+            };
+            let c_str = CString::new(str).unwrap();
 
-                if x_ptr.is_null() {
-                    error!("Error");
-                    return 1;
-                }
+            *x_ptr = c_str.into_raw();
+        },
 
-                *x_ptr = x.unwrap_or_else(|| or_default_int(0));
-                return 0;
+        ParameterValue::Bytes(value) => unsafe {
+            let x_ptr = args.next_arg::<*mut OfxBytes>();
+
+            if x_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
             }
+
+            // TODO: Default?
+            let slice = value.as_ref().unwrap();
+            *x_ptr = OfxBytes {
+                data: slice.as_ptr(),
+                length: slice.len(),
+            };
+        },
+
+        ParameterValue::Choice(x) => unsafe {
+            let x_ptr = args.next_arg::<*mut i32>();
+
+            if x_ptr.is_null() {
+                error!("Error");
+                return kOfxStatFailed;
+            }
+
+            *x_ptr = x.unwrap_or_else(|| or_default_int(0));
+        },
+        ParameterValue::None => {
+            error!("Uhhh... uninmplemented?");
+            return kOfxStatFailed;
         }
-        ParameterValue::None => error!("Uhhh... uninmplemented?"),
-        value => error!("{value:?} Uhhh... uninmplemented?"),
+        value => {
+            error!("{value:?} Uhhh... uninmplemented?");
+            return kOfxStatFailed;
+        }
     }
 
     kOfxStatOK
@@ -482,8 +439,8 @@ unsafe extern "C" fn param_get_derivative(
     _time: OfxTime,
     _: ...
 ) -> OfxStatus {
-    error!("paramGetDerivative not implemented");
-    2
+    error!("param_get_derivative not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -493,18 +450,14 @@ unsafe extern "C" fn param_get_integral(
     _time2: OfxTime,
     _: ...
 ) -> OfxStatus {
-    error!("paramGetIntegral not implemented");
-    2
+    error!("param_get_integral not implemented");
+    kOfxStatErrUnsupported
 }
-
-// ==========================================
-// 3. VALUE SETTERS & KEYFRAMES
-// ==========================================
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn param_set_value(_param_handle: OfxParamHandle, _: ...) -> OfxStatus {
-    error!("paramSetValue not implemented");
-    2
+    error!("param_set_value not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -513,8 +466,8 @@ unsafe extern "C" fn param_set_value_at_time(
     _time: OfxTime,
     _: ...
 ) -> OfxStatus {
-    error!("paramSetValueAtTime not implemented");
-    2
+    error!("param_set_value_at_time not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -522,8 +475,8 @@ unsafe extern "C" fn param_get_num_keys(
     _param_handle: OfxParamHandle,
     _number_of_keys: *mut c_uint,
 ) -> OfxStatus {
-    error!("paramGetNumKeys not implemented");
-    2
+    error!("param_get_num_keys not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -532,8 +485,8 @@ unsafe extern "C" fn param_get_key_time(
     _nth_key: c_uint,
     _time: *mut OfxTime,
 ) -> OfxStatus {
-    error!("paramGetKeyTime not implemented");
-    2
+    error!("param_get_key_time not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -543,24 +496,20 @@ unsafe extern "C" fn param_get_key_index(
     _direction: c_int,
     _index: *mut c_int,
 ) -> OfxStatus {
-    error!("paramGetKeyIndex not implemented");
-    2
+    error!("param_get_key_index not implemented");
+    kOfxStatErrUnsupported
 }
-
-// ==========================================
-// 4. MANAGEMENT & OPERATIONS
-// ==========================================
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn param_delete_key(_param_handle: OfxParamHandle, _time: OfxTime) -> OfxStatus {
-    error!("paramDeleteKey not implemented");
-    2
+    error!("param_delete_key not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn param_delete_all_keys(_param_handle: OfxParamHandle) -> OfxStatus {
-    error!("paramDeleteAllKeys not implemented");
-    2
+    error!("param_delete_all_keys not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -570,30 +519,24 @@ unsafe extern "C" fn param_copy(
     _dst_offset: OfxTime,
     _frame_range: *const OfxRangeD,
 ) -> OfxStatus {
-    error!("paramCopy not implemented");
-    2
+    error!("param_copy not implemented");
+    kOfxStatErrUnsupported
 }
-
-// ==========================================
-// 5. UNDO/REDO TRANSACTION BLOCKS
-// ==========================================
 
 #[instrument(level = "trace", ret(level = "trace"), fields(name = c_str_to_str(_name)))]
 unsafe extern "C" fn param_edit_begin(
     _param_set: OfxParamSetHandle,
     _name: *const c_char,
 ) -> OfxStatus {
-    error!("paramEditBegin not implemented");
-    2
+    error!("param_edit_begin not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn param_edit_end(_param_set: OfxParamSetHandle) -> OfxStatus {
-    error!("paramEditEnd not implemented");
-    2
+    error!("param_edit_end not implemented");
+    kOfxStatErrUnsupported
 }
-
-// Suite builder
 
 #[instrument(level = "trace", ret(level = "trace"))]
 pub fn parameter_suite() -> root::OfxParameterSuiteV1 {

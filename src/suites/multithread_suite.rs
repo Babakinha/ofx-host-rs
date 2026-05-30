@@ -1,11 +1,8 @@
-use crate::bindings::root::{self, kOfxStatOK};
+use crate::bindings::root::{self};
 use crate::bindings::root::{OfxMutexHandle, OfxStatus, OfxThreadFunctionV1};
+use crate::ofx_constants::{kOfxStatErrUnsupported, kOfxStatFailed, kOfxStatOK};
 use std::os::raw::{c_int, c_uint, c_void};
-use tracing::{debug, error, instrument};
-
-// ==========================================
-// 1. THREAD SPAWNING & INFORMATION
-// ==========================================
+use tracing::{error, instrument, warn};
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn multi_thread(
@@ -13,82 +10,77 @@ unsafe extern "C" fn multi_thread(
     n_threads: c_uint,
     custom_arg: *mut c_void,
 ) -> OfxStatus {
+    warn!("multi_thread half implemented");
     let func = func.unwrap();
     unsafe {
         func(0, 1, custom_arg);
     }
-    0
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn multi_thread_num_cpus(n_cpus: *mut c_uint) -> OfxStatus {
-    debug!("multiThreadNumCPUs called - reporting 1 CPU core");
+    warn!("multi_thread_num_cpus half implemented");
     if !n_cpus.is_null() {
         unsafe {
             *n_cpus = 1;
         }
-        kOfxStatOK as i32
+        kOfxStatOK
     } else {
-        1 // kOfxStatFailed
+        error!("Error!");
+        kOfxStatFailed
     }
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn multi_thread_index(thread_index: *mut c_uint) -> OfxStatus {
-    debug!("multiThreadIndex called");
+    warn!("multi_thread_index half implemented");
     if !thread_index.is_null() {
         unsafe {
             *thread_index = 0;
-        } // Base index for single-threaded fallback
-        0
+        }
+        kOfxStatOK
     } else {
-        1
+        error!("Error!");
+        kOfxStatFailed
     }
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn multi_thread_is_spawned_thread() -> c_int {
-    error!("multiThreadIsSpawnedThread not implemented");
-    0 // Return false (0) since we didn't spawn it via the host thread pool
+    error!("multi_thread_is_spawned_thread not implemented");
+    kOfxStatOK
 }
-
-// ==========================================
-// 2. MUTEX SYNCHRONIZATION POOL
-// ==========================================
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn mutex_create(_mutex: *mut OfxMutexHandle, _lock_count: c_int) -> OfxStatus {
-    error!("mutexCreate not implemented");
-    2
+    error!("mutex_create not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn mutex_destroy(_mutex: OfxMutexHandle) -> OfxStatus {
-    error!("mutexDestroy not implemented");
-    2
+    error!("mutex_destroy not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn mutex_lock(_mutex: OfxMutexHandle) -> OfxStatus {
-    error!("mutexLock not implemented");
-    2
+    error!("mutex_lock not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn mutex_unlock(_mutex: OfxMutexHandle) -> OfxStatus {
-    error!("mutexUnLock not implemented");
-    2
+    error!("mutex_unlock not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn mutex_try_lock(_mutex: OfxMutexHandle) -> OfxStatus {
-    error!("mutexTryLock not implemented");
-    2
+    error!("mutex_try_lock not implemented");
+    kOfxStatErrUnsupported
 }
-
-// ==========================================
-// SUITE BUILDER
-// ==========================================
 
 #[instrument(level = "trace", ret(level = "trace"))]
 pub fn multithread_suite() -> root::OfxMultiThreadSuiteV1 {

@@ -153,8 +153,8 @@ fn main() {
         let host_ptr = Box::into_raw(host_definition);
 
         // Load each plugin
-        for plugin_ptr in plugin_ptrs {
-            let plugin = &*plugin_ptr;
+        for plugin_ptr in plugin_ptrs[0..1].iter() {
+            let plugin = &**plugin_ptr;
 
             // Set host
             if let Some(set_host) = plugin.setHost {

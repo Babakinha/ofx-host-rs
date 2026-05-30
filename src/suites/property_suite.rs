@@ -2,10 +2,10 @@ use crate::{
     bindings::root::{OfxPropertySetHandle, OfxPropertySuiteV1, OfxStatus},
     instance::{self},
     log_utils::c_str_to_str,
-    ofx_constants::{kOfxStatErrBadHandle, kOfxStatFailed, kOfxStatOK},
+    ofx_constants::{kOfxStatErrBadHandle, kOfxStatErrUnsupported, kOfxStatFailed, kOfxStatOK},
 };
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
-use tracing::{error};
+use tracing::error;
 use tracing::instrument;
 use tracing::trace;
 use tracing::warn;
@@ -39,7 +39,6 @@ unsafe extern "C" fn prop_set_pointer(
         .entry(prop_key.clone())
         .or_insert_with(Vec::new);
 
-    // Ensure the vector is large enough to accommodate the incoming index
     if idx + 1 > entry.len() {
         trace!("Resizing: {} to {}", entry.len(), idx + 1);
         entry.resize(idx + 1, std::ptr::null_mut());
@@ -87,7 +86,6 @@ unsafe extern "C" fn prop_set_string(
         .entry(prop_key.clone())
         .or_insert_with(Vec::new);
 
-    // Ensure the vector is large enough to accommodate the incoming index
     if idx + 1 > entry.len() {
         trace!("Resizing: {} to {}", entry.len(), idx + 1);
         entry.resize(idx + 1, String::new());
@@ -123,7 +121,6 @@ unsafe extern "C" fn prop_set_double(
     let idx = index as usize;
     let entry = instance.doubles.entry(prop_key).or_insert_with(Vec::new);
 
-    // Ensure the vector is large enough to accommodate the incoming index
     if idx + 1 > entry.len() {
         trace!("Resizing: {} to {}", entry.len(), idx + 1);
         entry.resize(idx + 1, 0_f64);
@@ -159,7 +156,6 @@ unsafe extern "C" fn prop_set_int(
     let idx = index as usize;
     let entry = instance.ints.entry(prop_key).or_insert_with(Vec::new);
 
-    // Ensure the vector is large enough to accommodate the incoming index
     if idx + 1 > entry.len() {
         trace!("Resizing: {} to {}", entry.len(), idx + 1);
         entry.resize(idx + 1, 0);
@@ -196,7 +192,6 @@ unsafe extern "C" fn prop_set_pointer_n(
 
     let incoming_values = unsafe { std::slice::from_raw_parts(value, count as usize) };
 
-    // Ensure the vector is large enough to accommodate the incoming index
     if incoming_values.len() > entry.len() {
         trace!("Resizing: {} to {}", entry.len(), incoming_values.len());
         entry.resize(incoming_values.len(), std::ptr::null_mut());
@@ -214,8 +209,8 @@ unsafe extern "C" fn prop_set_string_n(
     _count: c_int,
     _value: *const *const c_char,
 ) -> OfxStatus {
-    error!("propSetStringN not implemented");
-    2
+    error!("prop_set_string_n not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(property)))]
@@ -245,7 +240,6 @@ unsafe extern "C" fn prop_set_double_n(
 
     let incoming_values = unsafe { std::slice::from_raw_parts(value, count as usize) };
 
-    // Ensure the vector is large enough to accommodate the incoming index
     if incoming_values.len() > entry.len() {
         trace!("Resizing: {} to {}", entry.len(), incoming_values.len());
         entry.resize(incoming_values.len(), 0_f64);
@@ -283,7 +277,6 @@ unsafe extern "C" fn prop_set_int_n(
 
     let incoming_values = unsafe { std::slice::from_raw_parts(value, count as usize) };
 
-    // Ensure the vector is large enough to accommodate the incoming index
     if incoming_values.len() > entry.len() {
         trace!("Resizing: {} to {}", entry.len(), incoming_values.len());
         entry.resize(incoming_values.len(), 0);
@@ -513,8 +506,8 @@ unsafe extern "C" fn prop_get_string_n(
     _count: c_int,
     _value: *mut *mut c_char,
 ) -> OfxStatus {
-    error!("propGetStringN not implemented");
-    2
+    error!("prop_get_string_n not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(property)))]
@@ -600,8 +593,8 @@ unsafe extern "C" fn prop_reset(
     _properties: OfxPropertySetHandle,
     _property: *const c_char,
 ) -> OfxStatus {
-    error!("propReset not implemented");
-    2
+    error!("prop_reset not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"), fields(property = c_str_to_str(_property)))]
@@ -610,8 +603,8 @@ unsafe extern "C" fn prop_get_dimension(
     _property: *const c_char,
     _count: *mut c_int,
 ) -> OfxStatus {
-    error!("propGetDimension not implemented");
-    2
+    error!("prop_get_dimension not implemented");
+    kOfxStatErrUnsupported
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]

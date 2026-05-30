@@ -4,10 +4,7 @@ use tracing::instrument;
 
 use crate::bindings::root;
 use crate::bindings::root::OfxStatus;
-
-// ==========================================
-// 1. MESSAGING IMPLEMENTATION
-// ==========================================
+use crate::ofx_constants::kOfxStatErrUnsupported;
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn message(
@@ -17,13 +14,9 @@ unsafe extern "C" fn message(
     _format: *const c_char,
     _: ...
 ) -> OfxStatus {
-    error!("OfxMessageSuiteV1::message called");
-    0 // kOfxStatOK
+    error!("message not implemented!");
+    kOfxStatErrUnsupported
 }
-
-// ==========================================
-// SUITE BUILDER
-// ==========================================
 
 #[instrument(level = "trace", ret(level = "trace"))]
 pub fn message_suite() -> root::OfxMessageSuiteV1 {

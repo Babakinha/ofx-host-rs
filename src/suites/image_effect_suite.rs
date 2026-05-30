@@ -5,24 +5,30 @@ use crate::bindings::root::{
 };
 use crate::instance::{self, AsPropertySet, BabafxInstance, ImageClip, PropertySet};
 use crate::log_utils::c_str_to_str;
-use crate::ofx_constants::{kOfxStatErrBadHandle, kOfxStatErrMemory, kOfxStatFailed, kOfxStatOK};
+use crate::ofx_constants::{
+    kOfxStatErrBadHandle, kOfxStatErrMemory, kOfxStatErrUnsupported, kOfxStatFailed, kOfxStatOK,
+};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
-use tracing::{error, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 const IMAGE_ALIGNMENT: usize = 16;
 
-// Structure stored transparently before the allocated image pointer to track state
 #[repr(C)]
 struct ImageMemoryHeader {
     total_size: usize,
     lock_count: usize,
 }
 
-// ==========================================
-// 1. INSTANCE PROPERTY & PARAMETER HOOKS
-// ==========================================
+const HEADER_PADDING: usize = {
+    let header_size = std::mem::size_of::<ImageMemoryHeader>();
+    if header_size % IMAGE_ALIGNMENT == 0 {
+        header_size
+    } else {
+        ((header_size / IMAGE_ALIGNMENT) + 1) * IMAGE_ALIGNMENT
+    }
+};
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn get_property_set(
@@ -62,10 +68,6 @@ unsafe extern "C" fn get_param_set(
     kOfxStatOK
 }
 
-// ==========================================
-// 2. VIDEO CLIP LIFE-CYCLE & RENDERING
-// ==========================================
-
 #[instrument(level = "trace", ret(level = "trace"), fields(name = c_str_to_str(name)))]
 unsafe extern "C" fn clip_define(
     image_effect: OfxImageEffectHandle,
@@ -88,14 +90,23 @@ unsafe extern "C" fn clip_define(
         crate::instance::ImageClip {
             name: name_str.clone(),
             properties: {
-                let width: i32 = 720;
-                let height: i32 = 480;
-                let bytes_per_pixel = 4;
-                let _total_bytes = width as usize * height as usize * bytes_per_pixel as usize;
+                let img = image::ImageReader::open("input.png")
+                    .unwrap()
+                    .decode()
+                    .unwrap()
+                    .to_rgba8();
+
+                let width: i32 = img.width() as i32;
+                let height: i32 = img.height() as i32;
+                let bytes_per_pixel: i32 = size_of::<u8>() as i32 * 4; // RGBA8
 
                 let mut set = PropertySet::new();
 
-                // --- Your Existing Setup ---
+                set.strings.insert(
+                    "OfxImagePropUniqueIdentifier".to_string(),
+                    vec!["host_frame_0001".to_string()],
+                );
+
                 set.strings.insert(
                     "OfxImageEffectPropPreMultiplication".to_string(),
                     vec!["OfxImageOpaque".to_string()],
@@ -109,53 +120,33 @@ unsafe extern "C" fn clip_define(
                     vec!["OfxImageComponentRGBA".to_string()],
                 );
 
-                // --- The Missing Pieces ---
-
-                // 1. Image Data Pointer
-                let pixel_buffer = image::ImageReader::open("input.png")
-                    .unwrap()
-                    .decode()
-                    .unwrap()
-                    .to_rgba8()
-                    .into_raw();
-
-                let pixel_buffer = pixel_buffer.into_boxed_slice();
-                set.pointers.insert(
-                    "OfxImagePropData".to_string(),
-                    vec![Box::into_raw(pixel_buffer) as *mut c_void],
-                );
-
-                // 2. Image Bounds [x1, y1, x2, y2]
-                set.ints
-                    .insert("OfxImagePropBounds".to_string(), vec![0, 0, width, height]);
-
-                // 3. Row Bytes (Stride)
-                set.ints.insert(
-                    "OfxImagePropRowBytes".to_string(),
-                    vec![width * bytes_per_pixel],
-                );
-
-                set.doubles.insert(
-                    "OfxImagePropPixelAspectRatio".to_string(),
-                    vec![1.0], // Square pixels
-                );
-
-                // 4. Interlacing Field Type
                 set.strings.insert(
                     "OfxImagePropField".to_string(),
                     vec!["OfxFieldNone".to_string()],
                 );
 
-                // Rendereiosmf Scale
+                set.doubles
+                    .insert("OfxImagePropPixelAspectRatio".to_string(), vec![1.0]);
+
                 set.doubles.insert(
                     String::from("OfxImageEffectPropRenderScale"),
                     vec![1.0, 1.0],
                 );
 
-                // 5. Unique Frame Identifier (Cache key)
-                set.strings.insert(
-                    "OfxImagePropUniqueIdentifier".to_string(),
-                    vec!["host_frame_0001".to_string()],
+                set.ints
+                    .insert("OfxImagePropBounds".to_string(), vec![0, 0, width, height]);
+
+                set.ints.insert(
+                    "OfxImagePropRowBytes".to_string(),
+                    vec![width * bytes_per_pixel],
+                );
+
+                let pixel_buffer = img.into_raw();
+
+                let pixel_buffer = pixel_buffer.into_boxed_slice();
+                set.pointers.insert(
+                    "OfxImagePropData".to_string(),
+                    vec![Box::into_raw(pixel_buffer) as *mut c_void],
                 );
 
                 set
@@ -258,31 +249,41 @@ unsafe extern "C" fn clip_get_image(
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn clip_release_image(image_handle: OfxPropertySetHandle) -> OfxStatus {
-    warn!("clip_release_image half implemented");
     let instance = unsafe { instance::PropertySet::ref_mut_from_ofx_handle(image_handle).unwrap() };
 
-    // 1. Retrieve the raw pointer you stored in the Output clip's PropertySet
     let raw_ptr: *mut c_void = instance.pointers.get("OfxImagePropData").unwrap()[0];
+    let bounds = instance.ints.get("OfxImagePropBounds").unwrap();
 
-    // 2. Define your dimensions (must match what you passed to OfxImagePropBounds)
-    let width = 720;
-    let height = 480;
-    let total_bytes = width * height * 4;
+    let width = bounds[2];
+    let height = bounds[3];
 
-    // 3. Reconstruct a safe Rust slice over the memory to work with it
+    let bytes_per_row = instance.ints.get("OfxImagePropRowBytes").unwrap()[0] / width;
+    let total_bytes = width * bytes_per_row * height;
+
     let pixel_slice: &[u8] =
-        unsafe { std::slice::from_raw_parts(raw_ptr as *const u8, total_bytes) };
+        unsafe { std::slice::from_raw_parts(raw_ptr as *const u8, total_bytes as usize) };
 
-    let binding = pixel_slice.to_vec();
-    // 2. Wrap the vector in an RgbaImage (which is an alias for ImageBuffer<Rgba<u8>, Vec<u8>>)
-    if let Some(image) = image::RgbaImage::from_raw(width as u32, height as u32, binding) {
-        // 3. Save it to disk
-        if let Err(e) = image.save("test.png") {
-            error!("Failed to save image: {}", e);
-        }
-    } else {
-        error!("Container was not big enough for the specified dimensions.");
+    let name = match instance.strings.get("OfxImagePropUniqueIdentifier") {
+        Some(string) => format!("{}", string[0]),
+        None => String::from("meow"),
+    };
+
+    let nanoseconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    debug!("Saving clip to {nanoseconds}_{name}.png");
+    if let Err(e) = image::save_buffer_with_format(
+        format!("{nanoseconds}_{name}.png",),
+        pixel_slice,
+        width as u32,
+        height as u32,
+        image::ColorType::Rgba8,
+        image::ImageFormat::Png,
+    ) {
+        error!("Failed to save image: {}", e);
     }
+
     kOfxStatOK
 }
 
@@ -310,7 +311,6 @@ unsafe extern "C" fn clip_get_region_of_definition(
     }
 
     warn!("Fallback");
-    // Fallback if the clip doesn't have bounds populated yet
     unsafe {
         (*bounds).x1 = 0.0;
         (*bounds).y1 = 0.0;
@@ -321,20 +321,11 @@ unsafe extern "C" fn clip_get_region_of_definition(
     kOfxStatOK
 }
 
-// ==========================================
-// 3. EXECUTION CONTROL
-// ==========================================
-
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn abort(_image_effect: OfxImageEffectHandle) -> c_int {
-    // Return 0 indicating the effect processing thread should continue running safely.
     error!("abort not implemented");
-    0
+    kOfxStatErrUnsupported
 }
-
-// ==========================================
-// 4. ALIGNED CUSTOM IMAGE POOL ALLOCATOR
-// ==========================================
 
 #[instrument(level = "trace", ret(level = "trace"))]
 unsafe extern "C" fn image_memory_alloc(
@@ -343,21 +334,11 @@ unsafe extern "C" fn image_memory_alloc(
     memory_handle: *mut OfxImageMemoryHandle,
 ) -> OfxStatus {
     if memory_handle.is_null() || n_bytes == 0 {
-        {
-            error!("Error");
-            return kOfxStatFailed;
-        } // kOfxStatFailed
+        error!("Error");
+        return kOfxStatFailed;
     }
 
-    let header_size = std::mem::size_of::<ImageMemoryHeader>();
-    // Padding ensures that the user data pointer following our header remains 16-byte aligned
-    let padding = if header_size % IMAGE_ALIGNMENT == 0 {
-        header_size
-    } else {
-        ((header_size / IMAGE_ALIGNMENT) + 1) * IMAGE_ALIGNMENT
-    };
-
-    let total_size = n_bytes + padding;
+    let total_size = HEADER_PADDING + n_bytes;
 
     match Layout::from_size_align(total_size, IMAGE_ALIGNMENT) {
         Ok(layout) => {
@@ -368,14 +349,12 @@ unsafe extern "C" fn image_memory_alloc(
                     return kOfxStatErrMemory;
                 }
 
-                // Write metadata structure header
                 let header_ptr = raw_ptr as *mut ImageMemoryHeader;
                 *header_ptr = ImageMemoryHeader {
                     total_size,
                     lock_count: 0,
                 };
 
-                // The memory handle returned back to the host system context
                 *memory_handle = raw_ptr as OfxImageMemoryHandle;
             }
             return kOfxStatOK;
@@ -425,18 +404,10 @@ unsafe extern "C" fn image_memory_lock(
         (*header_ptr).lock_count += 1;
     }
 
-    let header_size = std::mem::size_of::<ImageMemoryHeader>();
-    let padding = if header_size % IMAGE_ALIGNMENT == 0 {
-        header_size
-    } else {
-        ((header_size / IMAGE_ALIGNMENT) + 1) * IMAGE_ALIGNMENT
-    };
-
-    // Return the aligned client address offset past the metadata layout tracking area
     unsafe {
-        *returned_ptr = raw_ptr.add(padding) as *mut c_void;
+        *returned_ptr = raw_ptr.add(HEADER_PADDING) as *mut c_void;
     }
-    0
+    kOfxStatOK
 }
 
 #[instrument(level = "trace", ret(level = "trace"))]
@@ -455,10 +426,6 @@ unsafe extern "C" fn image_memory_unlock(memory_handle: OfxImageMemoryHandle) ->
     }
     kOfxStatOK
 }
-
-// ==========================================
-// SUITE BUILDER
-// ==========================================
 
 #[instrument(level = "trace", ret(level = "trace"))]
 pub fn image_effect_suite() -> root::OfxImageEffectSuiteV1 {
